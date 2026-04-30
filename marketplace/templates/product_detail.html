@@ -1,0 +1,387 @@
+{% extends 'base.html' %}
+{% block title %}Товар — Marketplace{% endblock %}
+{% block content %}
+<div id="productPageRoot" data-product-id="{{ product_id }}" data-image-placeholder="{{ image_placeholder }}">
+    <div id="stateLoading" class="py-5 text-center text-muted">
+        <div class="spinner-border spinner-border-sm" role="status"></div>
+        <span class="ms-2">Загрузка товара…</span>
+    </div>
+    <div id="stateError" class="alert alert-danger d-none" role="alert"></div>
+    <div id="stateMain" class="d-none">
+        <nav aria-label="breadcrumb" class="mb-3">
+            <ol class="breadcrumb mb-0">
+                <li class="breadcrumb-item"><a href="{% url 'home' %}">Каталог</a></li>
+                <li class="breadcrumb-item active" id="breadcrumbTitle">Товар</li>
+            </ol>
+        </nav>
+        <div class="row g-4">
+            <div class="col-lg-6">
+                <div class="position-relative bg-light rounded overflow-hidden" style="min-height: 280px;">
+                    <img id="galleryMain" src="" alt="" class="w-100 object-fit-contain" style="max-height: 420px; object-fit: contain;">
+                    <button type="button" id="galleryPrev" class="btn btn-light position-absolute top-50 start-0 translate-middle-y ms-1 shadow-sm">‹</button>
+                    <button type="button" id="galleryNext" class="btn btn-light position-absolute top-50 end-0 translate-middle-y me-1 shadow-sm">›</button>
+                </div>
+                <div id="galleryThumbs" class="d-flex flex-wrap gap-2 mt-2"></div>
+            </div>
+            <div class="col-lg-6">
+                <h1 id="productTitle" class="h3"></h1>
+                <p id="productDescription" class="text-muted small"></p>
+                <div id="productChars" class="mb-3"></div>
+                <hr>
+                <h2 class="h6">Вариации</h2>
+                <div id="skuList" class="d-flex flex-wrap gap-2 mb-3"></div>
+                <div id="skuStock" class="small mb-2"></div>
+                <div id="skuPrice" class="h4 mb-3"></div>
+                <button type="button" id="btnCart" class="btn btn-primary btn-lg" disabled>В корзину</button>
+                <p id="noSkuHint" class="text-muted small mt-2 d-none">Вариации не настроены — добавление в корзину недоступно.</p>
+            </div>
+        </div>
+        <section id="similarSection" class="mt-5 d-none">
+            <h2 class="h5 mb-3">Похожие товары</h2>
+            <div id="similarGrid" class="row row-cols-2 row-cols-md-4 g-3"></div>
+        </section>
+    </div>
+</div>
+
+<script>
+(() => {
+    const root = document.getElementById("productPageRoot");
+    const productId = root.dataset.productId;
+    const imagePlaceholder = root.dataset.imagePlaceholder || "";
+    const stateLoading = document.getElementById("stateLoading");
+    const stateError = document.getElementById("stateError");
+    const stateMain = document.getElementById("stateMain");
+
+    const galleryMain = document.getElementById("galleryMain");
+    const galleryThumbs = document.getElementById("galleryThumbs");
+    const galleryPrev = document.getElementById("galleryPrev");
+    const galleryNext = document.getElementById("galleryNext");
+    const productTitle = document.getElementById("productTitle");
+    const productDescription = document.getElementById("productDescription");
+    const productChars = document.getElementById("productChars");
+    const skuList = document.getElementById("skuList");
+    const skuStock = document.getElementById("skuStock");
+    const skuPrice = document.getElementById("skuPrice");
+    const btnCart = document.getElementById("btnCart");
+    const noSkuHint = document.getElementById("noSkuHint");
+    const breadcrumbTitle = document.getElementById("breadcrumbTitle");
+    const similarSection = document.getElementById("similarSection");
+    const similarGrid = document.getElementById("similarGrid");
+
+    let product = null;
+    let skus = [];
+    let selectedSku = null;
+    let galleryUrls = [];
+    let galleryIndex = 0;
+
+    function getSkuParam() {
+        const params = new URLSearchParams(window.location.search);
+        return (params.get("sku") || "").trim();
+    }
+
+    function setSkuParam(skuId) {
+        const url = new URL(window.location.href);
+        if (skuId) url.searchParams.set("sku", skuId);
+        else url.searchParams.delete("sku");
+        window.history.replaceState({}, "", url.pathname + url.search);
+    }
+
+    function centsToRub(cents) {
+        return Number(cents || 0) / 100;
+    }
+
+    function formatRub(cents) {
+        return centsToRub(cents).toLocaleString("ru-RU", {
+            minimumFractionDigits: 0,
+            maximumFractionDigits: 0,
+        }) + " ₽";
+    }
+
+    function skuQty(sku) {
+        const q = sku.active_quantity ?? sku.activeQuantity;
+        return Number(q || 0);
+    }
+
+    function pickSkuFromUrl(list) {
+        if (!list.length) return null;
+        const want = getSkuParam();
+        if (!want) return list[0];
+        const found = list.find((s) => String(s.id) === String(want));
+        return found || list[0];
+    }
+
+    function buildGalleryForSku(sku) {
+        const urls = [];
+        const seen = new Set();
+        const push = (u) => {
+            if (!u || seen.has(u)) return;
+            seen.add(u);
+            urls.push(u);
+        };
+        if (sku && sku.image) push(sku.image);
+        (product.images || []).forEach((img) => push(img.url));
+        if (!urls.length && imagePlaceholder) push(imagePlaceholder);
+        if (!urls.length) push("");
+        return urls;
+    }
+
+    function renderGallery() {
+        galleryUrls = buildGalleryForSku(selectedSku);
+        galleryIndex = 0;
+        const u = galleryUrls[galleryIndex];
+        galleryMain.src = u || "";
+        galleryMain.alt = product.title || "";
+        galleryThumbs.innerHTML = "";
+        galleryUrls.forEach((url, i) => {
+            const b = document.createElement("button");
+            b.type = "button";
+            b.className = "border rounded p-0 overflow-hidden bg-white" + (i === 0 ? " border-primary" : "");
+            b.style.width = "56px";
+            b.style.height = "56px";
+            const im = document.createElement("img");
+            im.src = url;
+            im.alt = "";
+            im.className = "w-100 h-100";
+            im.style.objectFit = "cover";
+            b.appendChild(im);
+            b.addEventListener("click", () => {
+                galleryIndex = i;
+                galleryMain.src = galleryUrls[galleryIndex];
+                [...galleryThumbs.children].forEach((c, j) => {
+                    c.classList.toggle("border-primary", j === galleryIndex);
+                    c.classList.toggle("border-secondary", j !== galleryIndex);
+                });
+            });
+            galleryThumbs.appendChild(b);
+        });
+    }
+
+    function renderPrice(sku) {
+        if (!sku) {
+            skuPrice.innerHTML = "";
+            return;
+        }
+        const price = Number(sku.price || 0);
+        const discount = Number(sku.discount || 0);
+        if (discount > 0) {
+            skuPrice.innerHTML =
+                '<span class="text-decoration-line-through text-muted me-2">' +
+                formatRub(price) +
+                "</span>" +
+                '<span class="text-primary">' +
+                formatRub(price - discount) +
+                "</span>";
+        } else {
+            skuPrice.innerHTML = '<span class="text-primary">' + formatRub(price) + "</span>";
+        }
+    }
+
+    function renderStock(sku) {
+        if (!sku) {
+            skuStock.textContent = "";
+            return;
+        }
+        const q = skuQty(sku);
+        const anyInStock = skus.some((s) => skuQty(s) > 0);
+        if (q > 0) {
+            skuStock.innerHTML = '<span class="text-success">В наличии</span> · остаток: ' + q;
+        } else if (anyInStock) {
+            skuStock.innerHTML = '<span class="text-warning">Нет в наличии</span> для этой вариации';
+        } else {
+            skuStock.innerHTML = '<span class="text-danger">Нет в наличии</span>';
+        }
+    }
+
+    function updateCartButton(sku) {
+        if (!sku || !skus.length) {
+            btnCart.disabled = true;
+            return;
+        }
+        btnCart.disabled = skuQty(sku) <= 0;
+    }
+
+    function selectSku(sku, syncUrl) {
+        selectedSku = sku;
+        if (syncUrl && sku && sku.id) setSkuParam(String(sku.id));
+        [...skuList.querySelectorAll("button")].forEach((btn) => {
+            const id = btn.dataset.skuId;
+            btn.classList.toggle("btn-primary", sku && String(sku.id) === id);
+            btn.classList.toggle("btn-outline-secondary", !sku || String(sku.id) !== id);
+        });
+        renderGallery();
+        renderPrice(sku);
+        renderStock(sku);
+        updateCartButton(sku);
+    }
+
+    function renderCharacteristics(rows) {
+        if (!rows || !rows.length) {
+            productChars.innerHTML = "";
+            return;
+        }
+        const table = document.createElement("table");
+        table.className = "table table-sm table-bordered mb-0";
+        rows.forEach((row) => {
+            const tr = document.createElement("tr");
+            tr.innerHTML =
+                "<th class=\"w-25 text-muted small\">" +
+                (row.name || "") +
+                "</th><td class=\"small\">" +
+                (row.value ?? "") +
+                "</td>";
+            table.appendChild(tr);
+        });
+        productChars.innerHTML = "";
+        productChars.appendChild(table);
+    }
+
+    function renderSkus() {
+        skuList.innerHTML = "";
+        if (!skus.length) {
+            noSkuHint.classList.remove("d-none");
+            btnCart.classList.add("d-none");
+            return;
+        }
+        noSkuHint.classList.add("d-none");
+        btnCart.classList.remove("d-none");
+        skus.forEach((sku) => {
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = "btn btn-sm btn-outline-secondary";
+            btn.dataset.skuId = String(sku.id);
+            const parts = (sku.characteristics || [])
+                .map((c) => (c.name && c.value ? c.name + ": " + c.value : null))
+                .filter(Boolean);
+            btn.textContent = parts.length ? parts.join(" · ") : (sku.name || "SKU");
+            btn.addEventListener("click", () => selectSku(sku, true));
+            skuList.appendChild(btn);
+        });
+    }
+
+    function showError(html, showCatalogBtn) {
+        stateLoading.classList.add("d-none");
+        stateMain.classList.add("d-none");
+        stateError.classList.remove("d-none");
+        const catalog = '<a class="btn btn-outline-secondary mt-2" href="{% url "home" %}">Вернуться в каталог</a>';
+        stateError.innerHTML = html + (showCatalogBtn ? catalog : "");
+    }
+
+    async function loadSimilar() {
+        try {
+            const r = await fetch("/api/v1/products/" + productId + "/similar?limit=8");
+            if (!r.ok) return;
+            const data = await r.json();
+            const items = Array.isArray(data.items) ? data.items : [];
+            if (!items.length) return;
+            similarSection.classList.remove("d-none");
+            similarGrid.innerHTML = "";
+            items.forEach((it) => {
+                const col = document.createElement("div");
+                col.className = "col";
+                const card = document.createElement("div");
+                card.className = "card h-100 position-relative";
+                const img = it.image
+                    ? '<img src="' + it.image + '" class="card-img-top" alt="" style="height:120px;object-fit:cover;">'
+                    : '<div class="bg-light text-center py-4 text-muted small">Нет фото</div>';
+                const stock = it.in_stock ? "" : '<div class="text-warning small">Нет в наличии</div>';
+                card.innerHTML =
+                    img +
+                    '<div class="card-body p-2">' +
+                    '<a class="stretched-link text-decoration-none text-dark small fw-semibold" href="/products/' +
+                    it.id +
+                    '">' +
+                    (it.title || "Товар") +
+                    "</a>" +
+                    stock +
+                    "</div>";
+                col.appendChild(card);
+                similarGrid.appendChild(col);
+            });
+        } catch (_) {
+            /* optional */
+        }
+    }
+
+    async function loadProduct() {
+        stateError.classList.add("d-none");
+        stateMain.classList.add("d-none");
+        stateLoading.classList.remove("d-none");
+
+        let response;
+        try {
+            response = await fetch("/api/v1/products/" + productId);
+        } catch (e) {
+            showError("<p>Не удалось загрузить товар, попробуйте позже.</p>", true);
+            return;
+        }
+
+        if (response.status === 404) {
+            showError("<p>Товар недоступен.</p>", true);
+            return;
+        }
+        if (response.status === 502 || response.status === 503) {
+            showError("<p>Не удалось загрузить товар, попробуйте позже.</p>", true);
+            return;
+        }
+        if (!response.ok) {
+            showError("<p>Не удалось загрузить товар (код " + response.status + ").</p>", true);
+            return;
+        }
+
+        let data;
+        try {
+            data = await response.json();
+        } catch (_) {
+            showError("<p>Не удалось загрузить товар, попробуйте позже.</p>", true);
+            return;
+        }
+
+        product = data;
+        skus = Array.isArray(data.skus) ? data.skus : [];
+        document.title = (data.title || "Товар") + " — Marketplace";
+        breadcrumbTitle.textContent = data.title || "Товар";
+        productTitle.textContent = data.title || "";
+        productDescription.textContent = data.description || "";
+        renderCharacteristics(data.characteristics);
+        renderSkus();
+        const sku = pickSkuFromUrl(skus);
+        if (sku) {
+            const param = getSkuParam();
+            if (!param || String(sku.id) !== param) {
+                setSkuParam(String(sku.id));
+            }
+        }
+        selectSku(sku, false);
+
+        stateLoading.classList.add("d-none");
+        stateMain.classList.remove("d-none");
+        loadSimilar();
+    }
+
+    galleryPrev.addEventListener("click", () => {
+        if (galleryUrls.length < 2) return;
+        galleryIndex = (galleryIndex - 1 + galleryUrls.length) % galleryUrls.length;
+        galleryMain.src = galleryUrls[galleryIndex];
+    });
+    galleryNext.addEventListener("click", () => {
+        if (galleryUrls.length < 2) return;
+        galleryIndex = (galleryIndex + 1) % galleryUrls.length;
+        galleryMain.src = galleryUrls[galleryIndex];
+    });
+
+    window.addEventListener("popstate", () => {
+        if (!skus.length) return;
+        const sku = pickSkuFromUrl(skus);
+        selectSku(sku, false);
+    });
+
+    btnCart.addEventListener("click", () => {
+        if (!selectedSku || skuQty(selectedSku) <= 0) return;
+        /* Корзина — отдельный сервис; заглушка */
+        alert("В корзину: SKU " + selectedSku.id + " (интеграция позже)");
+    });
+
+    loadProduct();
+})();
+</script>
+{% endblock %}

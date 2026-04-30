@@ -1,0 +1,199 @@
+{% extends 'base.html' %}
+{% block title %}Каталог — Marketplace{% endblock %}
+{% block content %}
+<div
+    id="catalogRoot"
+    class="py-3"
+    data-image-placeholder="{{ image_placeholder }}"
+>
+    <h1 class="h3 mb-3">Каталог</h1>
+    <div class="row g-2 mb-4 align-items-end">
+        <div class="col-md-5">
+            <label class="form-label small text-muted mb-1" for="catalogSearch">Поиск</label>
+            <input id="catalogSearch" type="search" class="form-control" placeholder="Например: iPhone" autocomplete="off">
+        </div>
+        <div class="col-md-2 col-6">
+            <label class="form-label small text-muted mb-1" for="catalogLimit">На странице</label>
+            <select id="catalogLimit" class="form-select">
+                <option value="12">12</option>
+                <option value="24" selected>24</option>
+                <option value="48">48</option>
+            </select>
+        </div>
+        <div class="col-md-2 col-6">
+            <label class="form-label small text-muted mb-1" for="catalogOffset">Смещение</label>
+            <input id="catalogOffset" type="number" class="form-control" value="0" min="0" step="12">
+        </div>
+        <div class="col-md-3">
+            <button id="catalogReload" type="button" class="btn btn-primary w-100">Показать</button>
+        </div>
+    </div>
+    <div id="catalogStatus" class="text-muted small mb-3">Загрузка…</div>
+    <div id="catalogGrid" class="row row-cols-2 row-cols-sm-2 row-cols-md-3 row-cols-lg-4 g-3"></div>
+</div>
+
+<script>
+(() => {
+    const root = document.getElementById("catalogRoot");
+    const placeholder = root.dataset.imagePlaceholder || "";
+    const statusEl = document.getElementById("catalogStatus");
+    const grid = document.getElementById("catalogGrid");
+    const searchInput = document.getElementById("catalogSearch");
+    const limitSelect = document.getElementById("catalogLimit");
+    const offsetInput = document.getElementById("catalogOffset");
+    const reloadBtn = document.getElementById("catalogReload");
+
+    function skuQty(sku) {
+        const q = sku.active_quantity ?? sku.activeQuantity ?? sku.quantity;
+        return Number(q || 0);
+    }
+
+    function pickImage(item) {
+        if (item.image && typeof item.image === "string") return item.image;
+        const imgs = item.images;
+        if (Array.isArray(imgs) && imgs[0] && imgs[0].url) return imgs[0].url;
+        const skus = item.skus || [];
+        for (let i = 0; i < skus.length; i++) {
+            const im = skus[i].image;
+            if (im) return im;
+        }
+        return placeholder;
+    }
+
+    function listPriceRub(item) {
+        const skus = item.skus || [];
+        let best = null;
+        skus.forEach((sku) => {
+            const p = Number(sku.price || 0);
+            const d = Number(sku.discount || 0);
+            const eff = (p - d) / 100;
+            if (best === null || eff < best) best = eff;
+        });
+        if (best !== null) return best;
+        if (item.price != null) return Number(item.price) / 100;
+        return null;
+    }
+
+    function anyInStock(item) {
+        const skus = item.skus || [];
+        if (!skus.length) return Boolean(item.in_stock);
+        return skus.some((s) => skuQty(s) > 0);
+    }
+
+    function productHref(item) {
+        const id = item.id;
+        const skus = item.skus || [];
+        const first = skus[0];
+        if (first && first.id) return "/products/" + id + "?sku=" + first.id;
+        return "/products/" + id;
+    }
+
+    function formatRub(n) {
+        if (n == null || Number.isNaN(n)) return "—";
+        return (
+            Math.round(n).toLocaleString("ru-RU", {
+                minimumFractionDigits: 0,
+                maximumFractionDigits: 0,
+            }) + " ₽"
+        );
+    }
+
+    function renderCard(item) {
+        const col = document.createElement("div");
+        col.className = "col";
+
+        const wrap = document.createElement("a");
+        wrap.href = productHref(item);
+        wrap.className = "text-decoration-none text-reset d-block h-100 catalog-card-link";
+
+        const card = document.createElement("div");
+        card.className = "card h-100 shadow-sm border-0 bg-light";
+
+        const img = document.createElement("img");
+        img.className = "card-img-top bg-white";
+        img.src = pickImage(item);
+        img.alt = "";
+        img.style.height = "200px";
+        img.style.objectFit = "cover";
+        img.loading = "lazy";
+
+        const body = document.createElement("div");
+        body.className = "card-body d-flex flex-column p-3";
+
+        const title = document.createElement("h2");
+        title.className = "h6 card-title text-truncate";
+        title.textContent = item.title || "Товар";
+        title.title = item.title || "";
+
+        const price = document.createElement("div");
+        price.className = "text-primary fw-semibold mt-1";
+        price.textContent = formatRub(listPriceRub(item));
+
+        const badge = document.createElement("div");
+        badge.className = "small mt-2";
+        const badgeSpan = document.createElement("span");
+        badgeSpan.className = anyInStock(item) ? "text-success" : "text-warning";
+        badgeSpan.textContent = anyInStock(item) ? "В наличии" : "Нет в наличии";
+        badge.appendChild(badgeSpan);
+
+        body.appendChild(title);
+        body.appendChild(price);
+        body.appendChild(badge);
+        card.appendChild(img);
+        card.appendChild(body);
+        wrap.appendChild(card);
+        col.appendChild(wrap);
+        return col;
+    }
+
+    async function loadCatalog() {
+        statusEl.textContent = "Загрузка…";
+        grid.innerHTML = "";
+
+        const params = new URLSearchParams();
+        params.set("limit", limitSelect.value || "24");
+        params.set("offset", String(Math.max(0, parseInt(offsetInput.value, 10) || 0)));
+        const q = searchInput.value.trim();
+        if (q) params.set("search", q);
+
+        let response;
+        try {
+            response = await fetch("/api/v1/products?" + params.toString());
+        } catch (e) {
+            statusEl.textContent = "Ошибка сети. Проверьте соединение и B2B.";
+            return;
+        }
+
+        if (!response.ok) {
+            statusEl.textContent = "Не удалось загрузить каталог (код " + response.status + ").";
+            return;
+        }
+
+        const data = await response.json();
+        const items = Array.isArray(data.items) ? data.items : [];
+        const total = data.total_count ?? items.length;
+        statusEl.textContent =
+            items.length === 0
+                ? "Ничего не найдено."
+                : "Показано: " + items.length + " из " + total + " товаров";
+
+        items.forEach((item) => {
+            if (!item.id) return;
+            grid.appendChild(renderCard(item));
+        });
+    }
+
+    reloadBtn.addEventListener("click", loadCatalog);
+    loadCatalog();
+})();
+</script>
+<style>
+.catalog-card-link .card {
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.catalog-card-link:hover .card {
+    transform: translateY(-2px);
+    box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.08) !important;
+}
+</style>
+{% endblock %}

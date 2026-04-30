@@ -1,0 +1,92 @@
+{% extends 'base.html' %}
+{% block content %}
+<h1 class="mt-3">Marketplace Demo UI</h1>
+<p class="text-muted">Минимальная витрина для проверки B2C catalog API.</p>
+<p><a class="btn btn-outline-primary" href="{% url 'catalog' %}">Открыть каталог с карточками</a></p>
+
+<div class="row g-3 mb-3">
+    <div class="col-md-4">
+        <label class="form-label" for="searchInput">Поиск</label>
+        <input id="searchInput" class="form-control" placeholder="Например: iPhone">
+    </div>
+    <div class="col-md-3">
+        <label class="form-label" for="limitInput">Лимит</label>
+        <input id="limitInput" type="number" class="form-control" value="10" min="1" max="100">
+    </div>
+    <div class="col-md-3">
+        <label class="form-label" for="offsetInput">Offset</label>
+        <input id="offsetInput" type="number" class="form-control" value="0" min="0">
+    </div>
+    <div class="col-md-2 d-flex align-items-end">
+        <button id="loadProductsBtn" class="btn btn-primary w-100">Загрузить</button>
+    </div>
+</div>
+
+<div class="card mb-3">
+    <div class="card-body">
+        <h5 class="card-title">Список товаров</h5>
+        <div id="listStatus" class="text-muted mb-2">Нажми "Загрузить".</div>
+        <div id="productsContainer" class="list-group"></div>
+    </div>
+</div>
+
+<p class="text-muted small">По клику открывается страница товара <code>/products/&lt;id&gt;?sku=…</code>.</p>
+
+<script>
+(() => {
+    const loadBtn = document.getElementById("loadProductsBtn");
+    const productsContainer = document.getElementById("productsContainer");
+    const listStatus = document.getElementById("listStatus");
+    const searchInput = document.getElementById("searchInput");
+    const limitInput = document.getElementById("limitInput");
+    const offsetInput = document.getElementById("offsetInput");
+
+    async function loadProducts() {
+        listStatus.textContent = "Загрузка...";
+        productsContainer.innerHTML = "";
+
+        const params = new URLSearchParams();
+        const search = searchInput.value.trim();
+        const limit = limitInput.value.trim() || "10";
+        const offset = offsetInput.value.trim() || "0";
+        params.set("limit", limit);
+        params.set("offset", offset);
+        if (search) params.set("search", search);
+
+        try {
+            const response = await fetch(`/api/v1/products?${params.toString()}`);
+            if (!response.ok) {
+                listStatus.textContent = `Ошибка загрузки списка: ${response.status}`;
+                return;
+            }
+            const data = await response.json();
+            const items = Array.isArray(data.items) ? data.items : [];
+            listStatus.textContent = `Получено: ${items.length} / total: ${data.total_count ?? "-"}`;
+
+            if (!items.length) {
+                productsContainer.innerHTML = '<div class="text-muted">Пусто</div>';
+                return;
+            }
+
+            items.forEach((item) => {
+                const row = document.createElement("a");
+                row.href = "/products/" + item.id;
+                row.className = "list-group-item list-group-item-action";
+                row.innerHTML = `
+                    <div class="d-flex w-100 justify-content-between">
+                        <strong>${item.title ?? "(без названия)"}</strong>
+                        <small>${item.status ?? ""}</small>
+                    </div>
+                    <small class="text-muted">id: ${item.id}</small>
+                `;
+                productsContainer.appendChild(row);
+            });
+        } catch (error) {
+            listStatus.textContent = `Ошибка сети: ${error.message}`;
+        }
+    }
+
+    loadBtn.addEventListener("click", loadProducts);
+})();
+</script>
+{% endblock %}
