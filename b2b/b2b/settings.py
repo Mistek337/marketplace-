@@ -100,3 +100,11 @@ REST_FRAMEWORK = {
 }
 
 B2C_TO_B2B_KEY = os.environ.get("B2C_TO_B2B_KEY", "dev-b2c-key")
+
+# Локальная отладка B2C↔B2B: список товаров для витрины без фильтра MODERATED/остатка (только deleted=False).
+# На продакшене переменная должна быть выключена.
+CATALOG_DEV_VISIBILITY = os.environ.get("CATALOG_DEV_VISIBILITY", "").lower() in (
+    "1",
+    "true",
+    "yes",
+)

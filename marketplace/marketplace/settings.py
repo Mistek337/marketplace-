@@ -159,3 +159,10 @@ B2C_IMAGE_PLACEHOLDER = os.environ.get(
     "B2C_IMAGE_PLACEHOLDER",
     "https://via.placeholder.com/320x320?text=No+Image",
 )
+
+# Синхронно с B2B CATALOG_DEV_VISIBILITY: карточка товара доступна до модерации (только для отладки).
+CATALOG_DEV_VISIBILITY = os.environ.get("CATALOG_DEV_VISIBILITY", "").lower() in (
+    "1",
+    "true",
+    "yes",
+)

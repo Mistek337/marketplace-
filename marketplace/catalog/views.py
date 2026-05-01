@@ -503,12 +503,13 @@ class ProductDetailView(APIView):
         except B2BClientError as exc:
             return _map_b2b_error(exc)
 
-        # B2C visibility guard for product card.
-        if product.get("status") != "MODERATED" or bool(product.get("deleted", False)):
-            return Response(
-                {"message": "Not found"},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+        # Витрина: по умолчанию только MODERATED; для отладки — см. CATALOG_DEV_VISIBILITY в settings.
+        if not getattr(settings, "CATALOG_DEV_VISIBILITY", False):
+            if product.get("status") != "MODERATED" or bool(product.get("deleted", False)):
+                return Response(
+                    {"message": "Not found"},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
 
         return Response(_to_b2c_card(product))
 

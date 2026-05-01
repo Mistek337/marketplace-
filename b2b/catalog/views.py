@@ -139,13 +139,16 @@ class ProductListCreateAPIView(generics.ListCreateAPIView):
             "skus__characteristic_rows",
         )
 
-        # Visibility for B2C catalog
-        visible_sku_qs = SKU.objects.filter(product_id=OuterRef("pk"), active_quantity__gt=0)
-        qs = qs.annotate(has_stock=Exists(visible_sku_qs)).filter(
-            status=Product.Status.MODERATED,
-            deleted=False,
-            has_stock=True,
-        )
+        # Витрина B2C: по умолчанию только MODERATED + остаток. Для локальной отладки см. CATALOG_DEV_VISIBILITY.
+        if getattr(settings, "CATALOG_DEV_VISIBILITY", False):
+            qs = qs.filter(deleted=False)
+        else:
+            visible_sku_qs = SKU.objects.filter(product_id=OuterRef("pk"), active_quantity__gt=0)
+            qs = qs.annotate(has_stock=Exists(visible_sku_qs)).filter(
+                status=Product.Status.MODERATED,
+                deleted=False,
+                has_stock=True,
+            )
 
         category = request.query_params.get("category")
         if category:

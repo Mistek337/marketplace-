@@ -27,6 +27,8 @@ services:
       POSTGRES_HOST: db
       POSTGRES_PORT: "5432"
       B2C_TO_B2B_KEY: dev-b2c-key
+      # Показывать в каталоге B2C товары до MODERATED (локально; на проде отключить).
+      CATALOG_DEV_VISIBILITY: "1"
       DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1,b2b
     depends_on:
       db:
@@ -47,6 +49,7 @@ services:
       B2B_BASE_URL: http://b2b:8001
       B2B_SERVICE_KEY: dev-b2c-key
       B2B_API_PREFIX: /api/v1
+      CATALOG_DEV_VISIBILITY: "1"
       DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1,b2c
     depends_on:
       db:
