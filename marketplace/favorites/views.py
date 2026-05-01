@@ -1,5 +1,6 @@
 import uuid
 
+from django.db import DatabaseError
 from rest_framework import permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -7,17 +8,35 @@ from rest_framework.views import APIView
 from catalog.b2b_client import B2BClient, B2BClientError
 
 
+def _safe_sku_qty(first):
+    if not isinstance(first, dict):
+        return 0
+    q = first.get("active_quantity")
+    if q is None:
+        q = first.get("activeQuantity")
+    try:
+        return int(q) if q is not None else 0
+    except (TypeError, ValueError):
+        return 0
+
+
 def _b2c_product_stub(product_id, raw):
     if not isinstance(raw, dict):
         return {"product_id": str(product_id), "title": None, "error": "invalid_upstream"}
     skus = raw.get("skus") or []
-    first = skus[0] if skus else {}
-    qty = first.get("active_quantity") or first.get("activeQuantity") or 0
+    first = skus[0] if skus and isinstance(skus[0], dict) else {}
+    qty = _safe_sku_qty(first)
+    price = first.get("price")
+    if price is not None:
+        try:
+            price = int(price)
+        except (TypeError, ValueError):
+            price = None
     return {
         "product_id": str(product_id),
         "title": raw.get("title"),
-        "price": first.get("price"),
-        "in_stock": int(qty or 0) > 0,
+        "price": price,
+        "in_stock": qty > 0,
     }
 
 
@@ -45,7 +64,17 @@ class FavoritesListView(APIView):
                 {"code": "INVALID_REQUEST", "message": "product_id must be a valid UUID"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        fav, _ = request.user.favorites.get_or_create(product_id=product_id)
+        try:
+            fav, _ = request.user.favorites.get_or_create(product_id=product_id)
+        except DatabaseError as exc:
+            return Response(
+                {
+                    "code": "DATABASE_ERROR",
+                    "message": "Выполните миграции B2C: python manage.py migrate",
+                    "detail": str(exc),
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
         client = B2BClient()
         try:
             p = client.get_product(fav.product_id)

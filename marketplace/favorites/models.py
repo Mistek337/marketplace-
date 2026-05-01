@@ -11,6 +11,7 @@ class Favorite(models.Model):
         related_name="favorites",
     )
     product_id = models.UUIDField(db_index=True)
+    added_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         unique_together = ("user", "product_id")

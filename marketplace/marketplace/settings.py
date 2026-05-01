@@ -26,8 +26,14 @@ SECRET_KEY = 'django-insecure-kgo0#^a&y7*o#ox!$qr=!m$w2@1-7=v343)amv(7bzoqihe=k_
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-# Для разработки разрешаем локальные хосты и тестовый клиент Django
-ALLOWED_HOSTS = ["127.0.0.1", "localhost", "testserver"]
+# Docker: задайте DJANGO_ALLOWED_HOSTS=host1,host2 (через запятую)
+ALLOWED_HOSTS = [
+    h.strip()
+    for h in os.environ.get(
+        "DJANGO_ALLOWED_HOSTS", "127.0.0.1,localhost,testserver"
+    ).split(",")
+    if h.strip()
+]
 
 # Application definition
 
@@ -79,13 +85,13 @@ WSGI_APPLICATION = 'marketplace.wsgi.application'
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
 DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'neomarket',
-        'USER': 'postgres',
-        'PASSWORD': '12345',
-        'HOST': 'localhost',
-        'PORT': '5432',
+    "default": {
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": os.environ.get("POSTGRES_DB", "neomarket"),
+        "USER": os.environ.get("POSTGRES_USER", "postgres"),
+        "PASSWORD": os.environ.get("POSTGRES_PASSWORD", "12345"),
+        "HOST": os.environ.get("POSTGRES_HOST", "localhost"),
+        "PORT": os.environ.get("POSTGRES_PORT", "5432"),
     }
 }
 
@@ -147,8 +153,8 @@ B2B_TIMEOUT = float(os.environ.get("B2B_TIMEOUT", "5"))
 B2B_SERVICE_TOKEN = os.environ.get("B2B_SERVICE_TOKEN", "")
 # Совпадает с B2C_TO_B2B_KEY на B2B; передаётся заголовком X-Service-Key (список товаров для витрины).
 B2B_SERVICE_KEY = os.environ.get("B2B_SERVICE_KEY", "dev-b2c-key")
-# Префикс API на стороне B2B: у проекта на Desktop это /api (см. b2b/urls.py + catalog/urls.py).
-B2B_API_PREFIX = (os.environ.get("B2B_API_PREFIX") or "/api").strip()
+# Префикс API на стороне B2B (все маршруты под /api/v1/).
+B2B_API_PREFIX = (os.environ.get("B2B_API_PREFIX") or "/api/v1").strip()
 B2C_IMAGE_PLACEHOLDER = os.environ.get(
     "B2C_IMAGE_PLACEHOLDER",
     "https://via.placeholder.com/320x320?text=No+Image",

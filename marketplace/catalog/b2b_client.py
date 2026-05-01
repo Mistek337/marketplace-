@@ -15,11 +15,11 @@ class B2BClient:
     def __init__(self):
         self.base_url = settings.B2B_BASE_URL.rstrip("/")
         self.timeout = settings.B2B_TIMEOUT
-        raw = getattr(settings, "B2B_API_PREFIX", "/api") or "/api"
+        raw = getattr(settings, "B2B_API_PREFIX", "/api/v1") or "/api/v1"
         raw = str(raw).strip()
         if not raw.startswith("/"):
             raw = "/" + raw
-        self.api_prefix = raw.rstrip("/") or "/api"
+        self.api_prefix = raw.rstrip("/") or "/api/v1"
 
     def _api_path(self, *parts):
         tail = "/".join(str(p).strip("/") for p in parts if p)
@@ -73,7 +73,7 @@ class B2BClient:
                 raise first
 
     def get_products(self, *, limit, offset, category_id=None, filters=None, sort=None, search=None):
-        # B2B (Desktop): GET /api/products/?category=<uuid>&… — параметр категории называется category.
+        # B2B: GET /api/v1/products/?category=<uuid>&… — параметр категории называется category.
         data = self._get(
             self._api_path("products"),
             query={

@@ -15,7 +15,13 @@ SECRET_KEY = 'django-insecure-change-me-in-production'
 
 DEBUG = True
 
-ALLOWED_HOSTS: list[str] = ['localhost', '127.0.0.1', 'testserver']
+ALLOWED_HOSTS: list[str] = [
+    h.strip()
+    for h in os.environ.get(
+        "DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1,testserver"
+    ).split(",")
+    if h.strip()
+]
 
 INSTALLED_APPS = [
     'django.contrib.admin',
