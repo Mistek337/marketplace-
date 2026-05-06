@@ -1,4 +1,5 @@
 from django.db import transaction
+from uuid import UUID
 from rest_framework import generics, status
 from rest_framework import permissions
 from rest_framework.response import Response
@@ -293,6 +294,38 @@ class ProductRetrieveUpdateAPIView(generics.RetrieveUpdateAPIView):
 
     def patch(self, request, *args, **kwargs):
         return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
+
+    def get(self, request, *args, **kwargs):
+        raw_id = kwargs.get("pk")
+        try:
+            product_id = UUID(str(raw_id))
+        except (TypeError, ValueError):
+            return Response(
+                {"code": "INVALID_REQUEST", "message": "id must be a valid UUID"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        qs = self.get_queryset().filter(id=product_id)
+        service_key = request.headers.get("X-Service-Key")
+        moderation_key = getattr(settings, "MODERATION_TO_B2B_KEY", "") or ""
+        is_moderation_call = bool(moderation_key and service_key == moderation_key)
+
+        if not is_moderation_call:
+            if not request.user or not getattr(request.user, "is_authenticated", False):
+                return Response(
+                    {"code": "NOT_FOUND", "message": "Product not found"},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+            qs = qs.filter(seller_id=getattr(request.user, "id", None))
+
+        product = qs.first()
+        if product is None:
+            return Response(
+                {"code": "NOT_FOUND", "message": "Product not found"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        return Response(ProductDetailSerializer(product).data, status=status.HTTP_200_OK)
 
 
 class SKUCreateAPIView(generics.CreateAPIView):

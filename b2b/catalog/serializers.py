@@ -140,6 +140,9 @@ class ProductDetailSerializer(serializers.ModelSerializer):
         read_only=True,
     )
     skus = SKUSerializer(many=True, read_only=True)
+    blocked = serializers.SerializerMethodField()
+    blocking_reason = serializers.SerializerMethodField()
+    field_reports = serializers.SerializerMethodField()
 
     class Meta:
         model = Product
@@ -150,13 +153,42 @@ class ProductDetailSerializer(serializers.ModelSerializer):
             'title',
             'description',
             'status',
+            'deleted',
+            'blocked',
             'category',
             'images',
             'characteristics',
             'skus',
+            'blocking_reason',
+            'field_reports',
             'created_at',
             'updated_at',
         )
+
+    def get_blocked(self, obj: Product) -> bool:
+        return obj.status in (Product.Status.BLOCKED, Product.Status.HARD_BLOCKED)
+
+    def get_blocking_reason(self, obj: Product):
+        # Заглушка до интеграции с Moderation: для BLOCKED возвращаем причину в ожидаемой форме.
+        if obj.status != Product.Status.BLOCKED:
+            return None
+        return {
+            "id": "00000000-0000-0000-0000-000000000001",
+            "title": "Blocked by moderation",
+            "comment": "Stub reason until moderation integration is connected",
+        }
+
+    def get_field_reports(self, obj: Product):
+        # Заглушка до интеграции с Moderation.
+        if obj.status != Product.Status.BLOCKED:
+            return []
+        return [
+            {
+                "field_name": "description",
+                "sku_id": None,
+                "comment": "Stub report until moderation integration is connected",
+            }
+        ]
 
 
 class ProductCreateCategorySerializer(serializers.ModelSerializer):
