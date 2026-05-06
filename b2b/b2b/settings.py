@@ -108,3 +108,7 @@ CATALOG_DEV_VISIBILITY = os.environ.get("CATALOG_DEV_VISIBILITY", "").lower() in
     "true",
     "yes",
 )
+
+MODERATION_BASE_URL = os.environ.get("MODERATION_BASE_URL", "")
+B2B_TO_MODERATION_KEY = os.environ.get("B2B_TO_MODERATION_KEY", "")
+MODERATION_TIMEOUT = float(os.environ.get("MODERATION_TIMEOUT", "5"))

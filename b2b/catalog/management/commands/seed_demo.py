@@ -76,17 +76,21 @@ class Command(BaseCommand):
             product=product,
             name="128 GB, чёрный",
             price=8_999_000,
+            cost_price=7_500_000,
             discount=0,
             image="https://via.placeholder.com/200x200?text=128GB",
             active_quantity=25,
+            reserved_quantity=0,
         )
         SKU.objects.create(
             product=product,
             name="256 GB, белый",
             price=10_999_000,
+            cost_price=9_300_000,
             discount=500_000,
             image="https://via.placeholder.com/200x200?text=256GB",
             active_quantity=12,
+            reserved_quantity=0,
         )
 
         verb = "Создан" if created else "Обновлён"

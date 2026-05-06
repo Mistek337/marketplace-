@@ -1,3 +1,4 @@
+from django.db import transaction
 from rest_framework import generics, status
 from rest_framework import permissions
 from rest_framework.response import Response
@@ -7,6 +8,7 @@ from django.db.models import Exists, OuterRef, Q, Min
 from sellers.auth import SellerJWTAuthentication
 
 from .models import Category, Product, SKU
+from .moderation_client import ModerationClientError, emit_product_created_event
 from .serializers import (
     B2CProductSerializer,
     CategoryCreateSerializer,
@@ -241,8 +243,69 @@ class ProductRetrieveUpdateAPIView(generics.RetrieveUpdateAPIView):
 class SKUCreateAPIView(generics.CreateAPIView):
     """POST /api/v1/skus/ — создать SKU для товара."""
 
+    authentication_classes = [SellerJWTAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
     queryset = SKU.objects.select_related('product').prefetch_related('characteristic_rows')
     serializer_class = SKUCreateSerializer
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        if not serializer.is_valid():
+            field, err = next(iter(serializer.errors.items()))
+            message = err[0] if isinstance(err, list) else str(err)
+            return Response(
+                {"code": "INVALID_REQUEST", "message": message},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        data = serializer.validated_data
+        try:
+            with transaction.atomic():
+                product = Product.objects.select_for_update().filter(id=data["product_id"]).first()
+                if product is None:
+                    return Response(
+                        {"code": "NOT_FOUND", "message": "Product not found"},
+                        status=status.HTTP_404_NOT_FOUND,
+                    )
+
+                if product.status == Product.Status.HARD_BLOCKED:
+                    return Response(
+                        {
+                            "code": "FORBIDDEN",
+                            "message": "Cannot add SKU to hard-blocked product",
+                        },
+                        status=status.HTTP_403_FORBIDDEN,
+                    )
+
+                had_skus = SKU.objects.filter(product=product).exists()
+                characteristics_data = data.get("characteristics", [])
+                sku = SKU.objects.create(
+                    product=product,
+                    name=data["name"],
+                    price=data["price"],
+                    cost_price=data["cost_price"],
+                    discount=data.get("discount", 0),
+                    image=data["image"],
+                    active_quantity=0,
+                    reserved_quantity=0,
+                )
+                for row in characteristics_data:
+                    sku.characteristic_rows.create(**row)
+
+                if not had_skus and product.status == Product.Status.CREATED:
+                    product.status = Product.Status.ON_MODERATION
+                    product.save(update_fields=["status", "updated_at"])
+                    emit_product_created_event(product_id=product.id, seller_id=product.seller_id)
+        except ModerationClientError:
+            return Response(
+                {"code": "SERVICE_UNAVAILABLE", "message": "Moderation unavailable"},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        return Response(
+            self.get_serializer(sku).data,
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class SKURetrieveUpdateAPIView(generics.RetrieveUpdateAPIView):

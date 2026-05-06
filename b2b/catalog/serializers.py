@@ -99,9 +99,9 @@ class SKUCharacteristicSerializer(serializers.ModelSerializer):
 
 
 class SKUSerializer(serializers.ModelSerializer):
-    activeQuantity = serializers.IntegerField(source='active_quantity', read_only=True)
-    discount = serializers.IntegerField(read_only=True)
-    image = serializers.CharField(read_only=True, allow_null=True)
+    product_id = serializers.UUIDField(source='product.id', read_only=True)
+    active_quantity = serializers.IntegerField(read_only=True)
+    reserved_quantity = serializers.IntegerField(read_only=True)
     characteristics = SKUCharacteristicSerializer(
         source='characteristic_rows',
         many=True,
@@ -112,11 +112,14 @@ class SKUSerializer(serializers.ModelSerializer):
         model = SKU
         fields = (
             'id',
+            'product_id',
             'name',
             'price',
+            'cost_price',
             'discount',
             'image',
-            'activeQuantity',
+            'active_quantity',
+            'reserved_quantity',
             'characteristics',
         )
 
@@ -167,31 +170,56 @@ class SKUCreateSerializer(serializers.ModelSerializer):
     POST /api/v1/skus — создать SKU у уже существующего товара.
     """
 
-    product = ProductRefWriteSerializer()
-    activeQuantity = serializers.IntegerField(source='active_quantity')
-    discount = serializers.IntegerField(required=False, default=0, min_value=0)
-    image = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    product_id = serializers.UUIDField()
+    name = serializers.CharField(max_length=255, required=False, allow_blank=True)
+    price = serializers.IntegerField(required=False)
+    cost_price = serializers.IntegerField(required=False)
+    discount = serializers.IntegerField(required=False, default=0)
+    image = serializers.CharField(required=False, allow_blank=True)
     characteristics = SKUCharacteristicSerializer(many=True, required=False)
 
     class Meta:
         model = SKU
         fields = (
-            'product',
+            'product_id',
             'name',
             'price',
+            'cost_price',
             'discount',
             'image',
-            'activeQuantity',
             'characteristics',
         )
 
-    def create(self, validated_data: dict) -> SKU:
-        product = validated_data.pop('product')['id']
-        characteristics_data = validated_data.pop('characteristics', [])
-        sku = SKU.objects.create(product=product, **validated_data)
-        for ch in characteristics_data:
-            SKUCharacteristic.objects.create(sku=sku, **ch)
-        return sku
+    def validate(self, attrs: dict) -> dict:
+        name = (attrs.get('name') or '').strip()
+        if not name:
+            raise serializers.ValidationError({'name': 'name is required'})
+        attrs['name'] = name
+
+        image = (attrs.get('image') or '').strip()
+        if not image:
+            raise serializers.ValidationError({'image': 'image is required'})
+        attrs['image'] = image
+
+        price = attrs.get('price')
+        if price is None or int(price) <= 0:
+            raise serializers.ValidationError(
+                {'price': 'price must be a positive integer (kopecks)'}
+            )
+
+        cost_price = attrs.get('cost_price')
+        if cost_price is None or int(cost_price) <= 0:
+            raise serializers.ValidationError(
+                {'cost_price': 'cost_price must be a positive integer (kopecks)'}
+            )
+
+        discount = attrs.get('discount', 0)
+        if discount is None or int(discount) < 0:
+            raise serializers.ValidationError(
+                {'discount': 'discount must be a non-negative integer (kopecks)'}
+            )
+        attrs['discount'] = int(discount)
+        return attrs
 
     def to_representation(self, instance: SKU) -> dict:
         return SKUSerializer(instance, context=self.context).data
@@ -288,17 +316,28 @@ class ProductUpdateSerializer(serializers.ModelSerializer):
 class SKUUpdateSerializer(serializers.ModelSerializer):
     """PUT/PATCH /api/v1/skus/{id} — правки SKU (товар не переносится)."""
 
-    activeQuantity = serializers.IntegerField(source='active_quantity', required=False)
+    active_quantity = serializers.IntegerField(required=False)
+    reserved_quantity = serializers.IntegerField(required=False)
     discount = serializers.IntegerField(required=False, min_value=0)
-    image = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    image = serializers.CharField(required=False, allow_blank=True)
     characteristics = SKUCharacteristicSerializer(many=True, required=False)
 
     class Meta:
         model = SKU
-        fields = ('name', 'price', 'discount', 'image', 'activeQuantity', 'characteristics')
+        fields = (
+            'name',
+            'price',
+            'cost_price',
+            'discount',
+            'image',
+            'active_quantity',
+            'reserved_quantity',
+            'characteristics',
+        )
         extra_kwargs = {
             'name': {'required': False},
             'price': {'required': False},
+            'cost_price': {'required': False},
         }
 
     def update(self, instance: SKU, validated_data: dict) -> SKU:

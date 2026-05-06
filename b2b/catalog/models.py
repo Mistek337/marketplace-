@@ -36,6 +36,7 @@ class Product(models.Model):
         CREATED = 'CREATED', 'Created'
         ON_MODERATION = 'ON_MODERATION', 'On moderation'
         MODERATED = 'MODERATED', 'Moderated'
+        HARD_BLOCKED = 'HARD_BLOCKED', 'Hard blocked'
         BLOCKED = 'BLOCKED', 'Blocked'
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -100,9 +101,11 @@ class SKU(models.Model):
     price = models.PositiveBigIntegerField(
         help_text='Price in minor units (e.g. kopecks), as in API.',
     )
+    cost_price = models.PositiveBigIntegerField(default=1)
     discount = models.PositiveBigIntegerField(default=0)
-    image = models.CharField(max_length=2048, null=True, blank=True)
+    image = models.CharField(max_length=2048, default="")
     active_quantity = models.PositiveIntegerField(default=0)
+    reserved_quantity = models.PositiveIntegerField(default=0)
 
     class Meta:
         ordering = ['id']
