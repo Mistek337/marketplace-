@@ -231,16 +231,23 @@ class ProductCreateSerializer(serializers.ModelSerializer):
     Статус всегда UNMODERATED (поле status из запроса не используется).
     """
 
+    title = serializers.CharField(required=True, allow_blank=False, max_length=512)
+    description = serializers.CharField(required=True, allow_blank=False)
     category_id = serializers.PrimaryKeyRelatedField(
         queryset=Category.objects.all(),
         source='category',
     )
-    images = ProductImageSerializer(many=True, required=False)
+    images = ProductImageSerializer(many=True, required=True)
     characteristics = ProductCharacteristicSerializer(many=True, required=False)
 
     class Meta:
         model = Product
         fields = ('title', 'description', 'category_id', 'images', 'characteristics')
+
+    def validate_images(self, value):
+        if not value:
+            raise serializers.ValidationError("images is required")
+        return value
 
     def create(self, validated_data: dict) -> Product:
         category = validated_data.pop('category')
