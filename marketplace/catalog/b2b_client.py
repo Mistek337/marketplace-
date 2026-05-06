@@ -72,7 +72,7 @@ class B2BClient:
             except B2BClientError:
                 raise first
 
-    def get_products(self, *, limit, offset, category_id=None, filters=None, sort=None, search=None):
+    def get_products(self, *, limit, offset, category_id=None, filters=None, sort=None, search=None, ids=None):
         # B2B: GET /api/v1/products/?category=<uuid>&… — параметр категории называется category.
         data = self._get(
             self._api_path("products"),
@@ -83,6 +83,7 @@ class B2BClient:
                 "filters": filters,
                 "sort": sort,
                 "search": search,
+                "ids": ids,
             },
         )
         if isinstance(data, dict) and "items" in data:
