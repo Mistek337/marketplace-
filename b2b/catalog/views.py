@@ -17,6 +17,7 @@ from .serializers import (
     CategoryWithChildrenResponseSerializer,
     ProductMyListItemSerializer,
     ProductCreateSerializer,
+    ProductCreateResponseSerializer,
     ProductDetailSerializer,
     ProductListSerializer,
     ProductUpdateSerializer,
@@ -117,6 +118,60 @@ class ProductListCreateAPIView(generics.ListCreateAPIView):
         if self.request.method == 'POST':
             return ProductCreateSerializer
         return ProductListSerializer
+
+    @staticmethod
+    def _err_text(err):
+        if isinstance(err, list) and err:
+            return str(err[0])
+        return str(err)
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        if not serializer.is_valid():
+            errors = serializer.errors
+
+            if "title" in errors:
+                text = self._err_text(errors["title"])
+                if "required" in text or "blank" in text:
+                    msg = "title is required"
+                elif "255 characters" in text:
+                    msg = "title must be 1-255 characters"
+                else:
+                    msg = text
+                return Response(
+                    {"code": "INVALID_REQUEST", "message": msg},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            if "category_id" in errors:
+                text = self._err_text(errors["category_id"])
+                if "valid UUID" in text:
+                    msg = "category_id must be a valid UUID"
+                elif "does not exist" in text or "Invalid pk" in text:
+                    msg = "Category not found"
+                else:
+                    msg = text
+                return Response(
+                    {"code": "INVALID_REQUEST", "message": msg},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            if "images" in errors:
+                return Response(
+                    {"code": "INVALID_REQUEST", "message": "At least one image is required"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # fallback for other validation errors
+            field, err = next(iter(errors.items()))
+            return Response(
+                {"code": "INVALID_REQUEST", "message": self._err_text(err)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        product = serializer.save()
+        out = ProductCreateResponseSerializer(product)
+        return Response(out.data, status=status.HTTP_201_CREATED)
 
     def list(self, request, *args, **kwargs):
         service_key = request.headers.get("X-Service-Key")

@@ -159,6 +159,57 @@ class ProductDetailSerializer(serializers.ModelSerializer):
         )
 
 
+class ProductCreateCategorySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Category
+        fields = ("id", "name")
+
+
+class ProductCreateImageSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ProductImage
+        fields = ("url", "ordering")
+
+
+class ProductCreateCharacteristicSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ProductCharacteristic
+        fields = ("name", "value")
+
+
+class ProductCreateResponseSerializer(serializers.ModelSerializer):
+    category = ProductCreateCategorySerializer(read_only=True)
+    images = ProductCreateImageSerializer(source="image_rows", many=True, read_only=True)
+    characteristics = ProductCreateCharacteristicSerializer(
+        source="characteristic_rows",
+        many=True,
+        read_only=True,
+    )
+    blocked = serializers.SerializerMethodField()
+    skus = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Product
+        fields = (
+            "id",
+            "title",
+            "description",
+            "status",
+            "deleted",
+            "blocked",
+            "category",
+            "images",
+            "characteristics",
+            "skus",
+        )
+
+    def get_blocked(self, obj: Product) -> bool:
+        return obj.status in (Product.Status.BLOCKED, Product.Status.HARD_BLOCKED)
+
+    def get_skus(self, obj: Product) -> list:
+        return []
+
+
 class ProductRefWriteSerializer(serializers.Serializer):
     """Ссылка на существующий товар при создании SKU."""
 
@@ -231,8 +282,8 @@ class ProductCreateSerializer(serializers.ModelSerializer):
     Статус всегда UNMODERATED (поле status из запроса не используется).
     """
 
-    title = serializers.CharField(required=True, allow_blank=False, max_length=512)
-    description = serializers.CharField(required=True, allow_blank=False)
+    title = serializers.CharField(required=True, allow_blank=False, max_length=255)
+    description = serializers.CharField(required=True, allow_blank=False, max_length=5000)
     category_id = serializers.PrimaryKeyRelatedField(
         queryset=Category.objects.all(),
         source='category',
@@ -246,7 +297,7 @@ class ProductCreateSerializer(serializers.ModelSerializer):
 
     def validate_images(self, value):
         if not value:
-            raise serializers.ValidationError("images is required")
+            raise serializers.ValidationError("At least one image is required")
         return value
 
     def create(self, validated_data: dict) -> Product:
