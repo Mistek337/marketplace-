@@ -1,4 +1,4 @@
-{% extends 'base.html' %}
+﻿{% extends 'base.html' %}
 {% block title %}Каталог — Marketplace{% endblock %}
 {% block content %}
 <div
@@ -43,59 +43,31 @@
     const offsetInput = document.getElementById("catalogOffset");
     const reloadBtn = document.getElementById("catalogReload");
 
-    function skuQty(sku) {
-        const q = sku.active_quantity ?? sku.activeQuantity ?? sku.quantity;
-        return Number(q || 0);
-    }
-
     function pickImage(item) {
-        if (item.image && typeof item.image === "string") return item.image;
         const imgs = item.images;
         if (Array.isArray(imgs) && imgs[0] && imgs[0].url) return imgs[0].url;
-        const skus = item.skus || [];
-        for (let i = 0; i < skus.length; i++) {
-            const im = skus[i].image;
-            if (im) return im;
-        }
         return placeholder;
     }
 
-    function listPriceRub(item) {
-        const skus = item.skus || [];
-        let best = null;
-        skus.forEach((sku) => {
-            const p = Number(sku.price || 0);
-            const d = Number(sku.discount || 0);
-            const eff = (p - d) / 100;
-            if (best === null || eff < best) best = eff;
-        });
-        if (best !== null) return best;
-        if (item.price != null) return Number(item.price) / 100;
-        return null;
+    function formatRub(kopecks) {
+        if (kopecks == null || Number.isNaN(kopecks)) return "—";
+        const rub = Number(kopecks) / 100;
+        return Math.round(rub).toLocaleString("ru-RU") + " ₽";
     }
 
-    function anyInStock(item) {
-        const skus = item.skus || [];
-        if (!skus.length) return Boolean(item.in_stock);
-        return skus.some((s) => skuQty(s) > 0);
-    }
-
-    function productHref(item) {
-        const id = item.id;
-        const skus = item.skus || [];
-        const first = skus[0];
-        if (first && first.id) return "/products/" + id + "?sku=" + first.id;
-        return "/products/" + id;
-    }
-
-    function formatRub(n) {
-        if (n == null || Number.isNaN(n)) return "—";
-        return (
-            Math.round(n).toLocaleString("ru-RU", {
-                minimumFractionDigits: 0,
-                maximumFractionDigits: 0,
-            }) + " ₽"
-        );
+    function priceHtml(item) {
+        const min = Number(item.min_price || 0);
+        const old = item.old_price != null ? Number(item.old_price) : null;
+        if (old != null && old > min) {
+            return (
+                '<span class="text-decoration-line-through text-muted me-1 small">' +
+                formatRub(old) +
+                "</span><span class=\"text-primary fw-semibold\">" +
+                formatRub(min) +
+                "</span>"
+            );
+        }
+        return '<span class="text-primary fw-semibold">' + formatRub(min) + "</span>";
     }
 
     function renderCard(item) {
@@ -103,7 +75,7 @@
         col.className = "col";
 
         const wrap = document.createElement("a");
-        wrap.href = productHref(item);
+        wrap.href = "/products/" + item.id;
         wrap.className = "text-decoration-none text-reset d-block h-100 catalog-card-link";
 
         const card = document.createElement("div");
@@ -112,7 +84,7 @@
         const img = document.createElement("img");
         img.className = "card-img-top bg-white";
         img.src = pickImage(item);
-        img.alt = "";
+        img.alt = item.name || "";
         img.style.height = "200px";
         img.style.objectFit = "cover";
         img.loading = "lazy";
@@ -122,18 +94,18 @@
 
         const title = document.createElement("h2");
         title.className = "h6 card-title text-truncate";
-        title.textContent = item.title || "Товар";
-        title.title = item.title || "";
+        title.textContent = item.name || "Товар";
+        title.title = item.name || "";
 
         const price = document.createElement("div");
-        price.className = "text-primary fw-semibold mt-1";
-        price.textContent = formatRub(listPriceRub(item));
+        price.className = "mt-1";
+        price.innerHTML = priceHtml(item);
 
         const badge = document.createElement("div");
         badge.className = "small mt-2";
         const badgeSpan = document.createElement("span");
-        badgeSpan.className = anyInStock(item) ? "text-success" : "text-warning";
-        badgeSpan.textContent = anyInStock(item) ? "В наличии" : "Нет в наличии";
+        badgeSpan.className = item.has_stock ? "text-success" : "text-warning";
+        badgeSpan.textContent = item.has_stock ? "В наличии" : "Нет в наличии";
         badge.appendChild(badgeSpan);
 
         body.appendChild(title);
@@ -154,11 +126,11 @@
         params.set("limit", limitSelect.value || "24");
         params.set("offset", String(Math.max(0, parseInt(offsetInput.value, 10) || 0)));
         const q = searchInput.value.trim();
-        if (q) params.set("search", q);
+        if (q) params.set("q", q);
 
         let response;
         try {
-            response = await fetch("/api/v1/products?" + params.toString());
+            response = await fetch("/api/v1/catalog/products?" + params.toString());
         } catch (e) {
             statusEl.textContent = "Ошибка сети. Проверьте соединение и B2B.";
             return;
