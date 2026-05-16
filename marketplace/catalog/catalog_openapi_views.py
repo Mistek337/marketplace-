@@ -12,8 +12,8 @@ from .openapi_catalog import (
     to_catalog_product_detail,
     to_category_tree_nodes,
 )
-from .request_parsing import parse_catalog_list_params
-from .api_errors import catalog_not_found, map_b2b_error
+from .request_parsing import parse_catalog_list_params, parse_similar_limit_param
+from .api_errors import map_b2b_error
 
 
 def _validation_error(message: str, *, status_code=status.HTTP_400_BAD_REQUEST):
@@ -110,34 +110,26 @@ class CatalogCategoriesTreeView(APIView):
 
 
 class CatalogProductSimilarView(APIView):
+    """GET /api/v1/catalog/products/{product_id}/similar — OpenAPI: только 200 + [CatalogProductCard]."""
+
     permission_classes = [permissions.AllowAny]
 
     def get(self, request, product_id):
-        try:
-            limit = int(request.query_params.get("limit", 10))
-        except (TypeError, ValueError):
-            return _validation_error("Invalid limit parameter")
-        limit = max(1, min(limit, 50))
-
+        limit = parse_similar_limit_param(request)
         client = B2BClient()
         try:
-            anchor = client.get_product(product_id)
-        except B2BClientError as exc:
-            return map_b2b_error(exc)
-
-        if not _is_visible_product(anchor):
-            return catalog_not_found()
-
-        try:
             pool = client.get_similar_products(product_id, limit=limit)
-        except B2BClientError as exc:
-            return map_b2b_error(exc)
+        except B2BClientError:
+            pool = []
 
-        categories = _load_categories(client)
-        cards = []
-        for row in pool:
-            if isinstance(row, dict) and _is_visible_product(row):
-                cards.append(to_catalog_product_card(row, categories_flat=categories))
+        if not isinstance(pool, list):
+            pool = []
+
+        cards = [
+            to_catalog_product_card(row)
+            for row in pool
+            if isinstance(row, dict)
+        ]
         return Response(cards)
 
 

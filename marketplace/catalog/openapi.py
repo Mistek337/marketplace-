@@ -21,5 +21,5 @@ PAGINATED_CATALOG_REQUIRED = frozenset({"items", "total_count", "limit", "offset
 ALLOWED_STATUS = {
     "get_product_detail": frozenset({200, 404}),
     "get_products_list": frozenset({200, 400, 422}),
-    "get_similar": frozenset({200, 404}),
+    "get_similar": frozenset({200}),
 }
