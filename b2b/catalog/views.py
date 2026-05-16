@@ -10,7 +10,7 @@ from django.db.models import Exists, OuterRef, Q, Min
 from sellers.auth import SellerJWTAuthentication
 
 from .models import Category, Product, SKU, SKUImage
-from .moderation_client import emit_product_created_event
+from .moderation_client import emit_product_created_event, emit_product_edited_event
 from .api_errors import (
     FORBIDDEN,
     NOT_FOUND,
@@ -56,6 +56,15 @@ def _product_not_found_response() -> Response:
         error_body(code=NOT_FOUND, message="Product not found"),
         status=status.HTTP_404_NOT_FOUND,
     )
+
+
+def _transition_product_to_moderation_on_edit(product: Product) -> bool:
+    """MODERATED/BLOCKED → ON_MODERATION после правки (OpenAPI updateProduct/updateSku)."""
+    if product.status not in (Product.Status.MODERATED, Product.Status.BLOCKED):
+        return False
+    product.status = Product.Status.ON_MODERATION
+    product.save(update_fields=["status", "updated_at"])
+    return True
 
 
 class CategoryListAPIView(generics.ListCreateAPIView):
@@ -351,7 +360,17 @@ class ProductRetrieveUpdateAPIView(generics.RetrieveUpdateAPIView):
                 drf_validation_error(serializer.errors),
                 status=status.HTTP_422_UNPROCESSABLE_ENTITY,
             )
-        product = serializer.save()
+
+        emit_edited = False
+        with transaction.atomic():
+            product = Product.objects.select_for_update().get(pk=product.pk)
+            product = serializer.save()
+            if _transition_product_to_moderation_on_edit(product):
+                emit_edited = True
+
+        if emit_edited:
+            emit_product_edited_event(product_id=product.id, seller_id=product.seller_id)
+
         return Response(
             ProductResponseSerializer(product).data,
             status=status.HTTP_200_OK,
@@ -475,8 +494,8 @@ class SKURetrieveUpdateAPIView(generics.RetrieveUpdateAPIView):
             sku = self.get_object()
         except Http404:
             return Response(
-                error_body(code=NOT_FOUND, message="SKU not found"),
-                status=status.HTTP_404_NOT_FOUND,
+                error_body(code=FORBIDDEN, message="SKU not found"),
+                status=status.HTTP_403_FORBIDDEN,
             )
 
         if sku.product.status == Product.Status.HARD_BLOCKED:
@@ -491,7 +510,19 @@ class SKURetrieveUpdateAPIView(generics.RetrieveUpdateAPIView):
                 drf_validation_error(serializer.errors),
                 status=status.HTTP_422_UNPROCESSABLE_ENTITY,
             )
-        sku = serializer.save()
+
+        emit_edited = False
+        with transaction.atomic():
+            sku = SKU.objects.select_for_update().select_related("product").get(pk=sku.pk)
+            product = Product.objects.select_for_update().get(pk=sku.product_id)
+            sku = serializer.save()
+            if _transition_product_to_moderation_on_edit(product):
+                emit_edited = True
+
+        if emit_edited:
+            emit_product_edited_event(product_id=product.id, seller_id=product.seller_id)
+
+        sku.refresh_from_db()
         return Response(
             SKUResponseSerializer(sku).data,
             status=status.HTTP_200_OK,

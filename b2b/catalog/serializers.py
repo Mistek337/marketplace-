@@ -1,5 +1,6 @@
 from rest_framework import serializers
 
+from .openapi_patch import _NOT_PROVIDED, is_patch_null, pop_patch_value
 from .models import (
     Category,
     Product,
@@ -432,33 +433,57 @@ class ProductCreateSerializer(serializers.Serializer):
 class ProductUpdateSerializer(serializers.Serializer):
     """PATCH /api/v1/products/{id} — OpenAPI ProductUpdate (все поля опциональны)."""
 
-    title = serializers.CharField(required=False, allow_blank=False, max_length=255)
-    description = serializers.CharField(required=False, max_length=5000)
+    title = serializers.CharField(
+        required=False,
+        allow_null=True,
+        allow_blank=False,
+        max_length=255,
+    )
+    description = serializers.CharField(required=False, allow_null=True, max_length=5000)
     category_id = serializers.UUIDField(required=False, allow_null=True)
     characteristics = CharacteristicWriteSerializer(many=True, required=False, allow_null=True)
 
-    def validate_category_id(self, value):
-        if value is None:
-            return value
-        if not Category.objects.filter(pk=value).exists():
-            raise serializers.ValidationError('Category not found')
-        return value
+    def validate(self, attrs: dict) -> dict:
+        title = pop_patch_value(attrs, 'title')
+        if title is not _NOT_PROVIDED:
+            if is_patch_null(title):
+                raise serializers.ValidationError({'title': 'title cannot be null'})
+            attrs['title'] = title
+
+        description = pop_patch_value(attrs, 'description')
+        if description is not _NOT_PROVIDED:
+            attrs['description'] = '' if is_patch_null(description) else description
+
+        category_id = pop_patch_value(attrs, 'category_id')
+        if category_id is not _NOT_PROVIDED:
+            if is_patch_null(category_id):
+                raise serializers.ValidationError({'category_id': 'category_id cannot be null'})
+            if not Category.objects.filter(pk=category_id).exists():
+                raise serializers.ValidationError({'category_id': 'Category not found'})
+            attrs['category_id'] = category_id
+
+        characteristics = pop_patch_value(attrs, 'characteristics')
+        if characteristics is not _NOT_PROVIDED:
+            if is_patch_null(characteristics):
+                attrs['_characteristics'] = None
+            else:
+                attrs['_characteristics'] = characteristics
+
+        return attrs
 
     def update(self, instance: Product, validated_data: dict) -> Product:
-        characteristics_data = validated_data.pop('characteristics', serializers.empty)
+        characteristics_data = validated_data.pop('_characteristics', _NOT_PROVIDED)
 
         if 'title' in validated_data:
             instance.title = validated_data['title']
         if 'description' in validated_data:
             instance.description = validated_data['description']
         if 'category_id' in validated_data:
-            category_id = validated_data['category_id']
-            if category_id is not None:
-                instance.category_id = category_id
+            instance.category_id = validated_data['category_id']
 
         instance.save()
 
-        if characteristics_data is not serializers.empty:
+        if characteristics_data is not _NOT_PROVIDED:
             instance.characteristic_rows.all().delete()
             if characteristics_data:
                 for row in characteristics_data:
@@ -473,25 +498,61 @@ class ProductUpdateSerializer(serializers.Serializer):
 class SKUUpdateSerializer(serializers.Serializer):
     """PATCH /api/v1/skus/{id} — OpenAPI SKUUpdate (все поля опциональны)."""
 
-    name = serializers.CharField(required=False, max_length=255)
-    price = serializers.IntegerField(required=False, min_value=0)
-    discount = serializers.IntegerField(required=False, min_value=0)
+    name = serializers.CharField(required=False, allow_null=True, max_length=255)
+    price = serializers.IntegerField(required=False, allow_null=True, min_value=0)
+    discount = serializers.IntegerField(required=False, allow_null=True, min_value=0)
     cost_price = serializers.IntegerField(required=False, allow_null=True, min_value=0)
     article = serializers.CharField(required=False, allow_null=True, allow_blank=True)
     characteristics = CharacteristicWriteSerializer(many=True, required=False, allow_null=True)
 
-    def update(self, instance: SKU, validated_data: dict) -> SKU:
-        characteristics_data = validated_data.pop('characteristics', serializers.empty)
+    def validate(self, attrs: dict) -> dict:
+        name = pop_patch_value(attrs, 'name')
+        if name is not _NOT_PROVIDED:
+            if is_patch_null(name):
+                raise serializers.ValidationError({'name': 'name cannot be null'})
+            name = (name or '').strip()
+            if not name:
+                raise serializers.ValidationError({'name': 'name cannot be empty'})
+            attrs['name'] = name
 
-        if 'article' in validated_data:
-            article = (validated_data.get('article') or '').strip()
-            validated_data['article'] = article or None
+        for field in ('price', 'discount'):
+            value = pop_patch_value(attrs, field)
+            if value is not _NOT_PROVIDED:
+                if is_patch_null(value):
+                    raise serializers.ValidationError({field: f'{field} cannot be null'})
+                attrs[field] = int(value)
+
+        cost_price = pop_patch_value(attrs, 'cost_price')
+        if cost_price is not _NOT_PROVIDED:
+            if is_patch_null(cost_price):
+                attrs['cost_price'] = None
+            else:
+                attrs['cost_price'] = int(cost_price)
+
+        article = pop_patch_value(attrs, 'article')
+        if article is not _NOT_PROVIDED:
+            if is_patch_null(article):
+                attrs['article'] = None
+            else:
+                attrs['article'] = (article or '').strip() or None
+
+        characteristics = pop_patch_value(attrs, 'characteristics')
+        if characteristics is not _NOT_PROVIDED:
+            if is_patch_null(characteristics):
+                attrs['_characteristics'] = None
+            else:
+                attrs['_characteristics'] = characteristics
+
+        return attrs
+
+    def update(self, instance: SKU, validated_data: dict) -> SKU:
+        characteristics_data = validated_data.pop('_characteristics', _NOT_PROVIDED)
 
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
 
-        if characteristics_data is not serializers.empty:
+        if characteristics_data is not _NOT_PROVIDED:
             instance.characteristic_rows.all().delete()
             if characteristics_data:
                 for row in characteristics_data:
