@@ -10,6 +10,7 @@ from sellers.auth import SellerJWTAuthentication
 
 from .models import Category, Product, SKU
 from .moderation_client import ModerationClientError, emit_product_created_event
+from .validation_errors import validation_error_response
 from .serializers import (
     B2CProductSerializer,
     CategoryCreateSerializer,
@@ -101,7 +102,7 @@ class CategoryDetailAPIView(generics.RetrieveUpdateAPIView):
 
 
 class ProductListCreateAPIView(generics.ListCreateAPIView):
-    """GET /api/v1/products/ — список; POST /api/v1/products/ — создать (статус UNMODERATED)."""
+    """GET /api/v1/products/ — список; POST /api/v1/products/ — создать карточку (status CREATED)."""
 
     authentication_classes = [SellerJWTAuthentication]
     queryset = Product.objects.select_related('category').prefetch_related(
@@ -120,53 +121,11 @@ class ProductListCreateAPIView(generics.ListCreateAPIView):
             return ProductCreateSerializer
         return ProductListSerializer
 
-    @staticmethod
-    def _err_text(err):
-        if isinstance(err, list) and err:
-            return str(err[0])
-        return str(err)
-
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         if not serializer.is_valid():
-            errors = serializer.errors
-
-            if "title" in errors:
-                text = self._err_text(errors["title"])
-                if "required" in text or "blank" in text:
-                    msg = "title is required"
-                elif "255 characters" in text:
-                    msg = "title must be 1-255 characters"
-                else:
-                    msg = text
-                return Response(
-                    {"code": "INVALID_REQUEST", "message": msg},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-            if "category_id" in errors:
-                text = self._err_text(errors["category_id"])
-                if "valid UUID" in text:
-                    msg = "category_id must be a valid UUID"
-                elif "does not exist" in text or "Invalid pk" in text:
-                    msg = "Category not found"
-                else:
-                    msg = text
-                return Response(
-                    {"code": "INVALID_REQUEST", "message": msg},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-            if "images" in errors:
-                return Response(
-                    {"code": "INVALID_REQUEST", "message": "At least one image is required"},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-            # fallback for other validation errors
-            field, err = next(iter(errors.items()))
             return Response(
-                {"code": "INVALID_REQUEST", "message": self._err_text(err)},
+                validation_error_response(serializer.errors, request_data=request.data),
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
