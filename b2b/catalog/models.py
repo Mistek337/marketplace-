@@ -115,12 +115,11 @@ class SKU(models.Model):
     price = models.PositiveBigIntegerField(
         help_text='Price in minor units (e.g. kopecks), as in API.',
     )
-    cost_price = models.PositiveBigIntegerField(default=1)
+    cost_price = models.PositiveBigIntegerField(null=True, blank=True)
     discount = models.PositiveBigIntegerField(default=0)
-    image = models.CharField(max_length=2048, default="")
     active_quantity = models.PositiveIntegerField(default=0)
     reserved_quantity = models.PositiveIntegerField(default=0)
-    article = models.CharField(max_length=255, blank=True, default="")
+    article = models.CharField(max_length=255, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -135,7 +134,22 @@ class SKU(models.Model):
         return f'{self.product_id}:{self.name}'
 
 
+class SKUImage(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    sku = models.ForeignKey(
+        SKU,
+        on_delete=models.CASCADE,
+        related_name='image_rows',
+    )
+    url = models.CharField(max_length=2048)
+    ordering = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ['ordering', 'id']
+
+
 class SKUCharacteristic(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     sku = models.ForeignKey(
         SKU,
         on_delete=models.CASCADE,

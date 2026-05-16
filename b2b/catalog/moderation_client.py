@@ -1,9 +1,12 @@
 import json
+import logging
 import uuid
 from datetime import datetime, timezone
 from urllib import error, request
 
 from django.conf import settings
+
+logger = logging.getLogger(__name__)
 
 
 class ModerationClientError(Exception):
@@ -37,6 +40,6 @@ def emit_product_created_event(*, product_id, seller_id):
         with request.urlopen(req, timeout=timeout):
             return
     except error.URLError as exc:
-        raise ModerationClientError(f"Moderation unavailable: {exc}") from exc
+        logger.warning("Moderation unavailable (product CREATED event): %s", exc)
     except error.HTTPError as exc:
-        raise ModerationClientError(f"Moderation HTTP error: {exc.code}") from exc
+        logger.warning("Moderation HTTP error %s (product CREATED event)", exc.code)

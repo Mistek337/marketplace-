@@ -7,6 +7,7 @@ from .models import (
     ProductImage,
     SKU,
     SKUCharacteristic,
+    SKUImage,
 )
 
 
@@ -114,18 +115,20 @@ class SKUCharacteristicResponseSerializer(serializers.ModelSerializer):
         fields = ('id', 'name', 'value')
 
 
-class SKUImageResponseSerializer(serializers.Serializer):
-    id = serializers.UUIDField()
-    url = serializers.CharField()
-    ordering = serializers.IntegerField()
+class SKUImageSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SKUImage
+        fields = ('id', 'url', 'ordering')
 
 
 class SKUResponseSerializer(serializers.ModelSerializer):
-    """Seller-view SKU (OpenAPI SKUResponse)."""
+    """OpenAPI SKUResponse — seller view."""
 
     product_id = serializers.UUIDField(read_only=True)
     stock_quantity = serializers.IntegerField(read_only=True)
-    images = serializers.SerializerMethodField()
+    cost_price = serializers.IntegerField(allow_null=True, read_only=True)
+    article = serializers.CharField(allow_null=True, read_only=True)
+    images = SKUImageSerializer(source='image_rows', many=True, read_only=True)
     characteristics = SKUCharacteristicResponseSerializer(
         source='characteristic_rows',
         many=True,
@@ -151,23 +154,15 @@ class SKUResponseSerializer(serializers.ModelSerializer):
             'updated_at',
         )
 
-    def get_images(self, obj: SKU) -> list[dict]:
-        if not obj.image:
-            return []
-        return [
-            {
-                'id': str(obj.id),
-                'url': obj.image,
-                'ordering': 0,
-            }
-        ]
 
+class SKUPublicResponseSerializer(serializers.ModelSerializer):
+    """OpenAPI SKUPublicResponse — витрина B2C."""
 
-class SKUSerializer(serializers.ModelSerializer):
-    product_id = serializers.UUIDField(source='product.id', read_only=True)
-    active_quantity = serializers.IntegerField(read_only=True)
-    reserved_quantity = serializers.IntegerField(read_only=True)
-    characteristics = SKUCharacteristicSerializer(
+    product_id = serializers.UUIDField(read_only=True)
+    stock_quantity = serializers.IntegerField(read_only=True)
+    article = serializers.CharField(allow_null=True, read_only=True)
+    images = SKUImageSerializer(source='image_rows', many=True, read_only=True)
+    characteristics = SKUCharacteristicResponseSerializer(
         source='characteristic_rows',
         many=True,
         read_only=True,
@@ -180,11 +175,11 @@ class SKUSerializer(serializers.ModelSerializer):
             'product_id',
             'name',
             'price',
-            'cost_price',
             'discount',
-            'image',
+            'stock_quantity',
             'active_quantity',
-            'reserved_quantity',
+            'article',
+            'images',
             'characteristics',
         )
 
@@ -204,7 +199,7 @@ class ProductDetailSerializer(serializers.ModelSerializer):
         many=True,
         read_only=True,
     )
-    skus = SKUSerializer(many=True, read_only=True)
+    skus = SKUResponseSerializer(many=True, read_only=True)
     blocked = serializers.SerializerMethodField()
     blocking_reason = serializers.SerializerMethodField()
     field_reports = serializers.SerializerMethodField()
@@ -261,6 +256,7 @@ class ProductResponseSerializer(serializers.ModelSerializer):
 
     category_id = serializers.UUIDField(read_only=True)
     blocking_reason_id = serializers.UUIDField(read_only=True, allow_null=True)
+    moderator_comment = serializers.SerializerMethodField()
     images = ProductImageSerializer(source='image_rows', many=True, read_only=True)
     characteristics = ProductCharacteristicSerializer(
         source='characteristic_rows',
@@ -282,6 +278,40 @@ class ProductResponseSerializer(serializers.ModelSerializer):
             'deleted',
             'blocking_reason_id',
             'moderator_comment',
+            'images',
+            'characteristics',
+            'skus',
+            'created_at',
+            'updated_at',
+        )
+
+    def get_moderator_comment(self, obj: Product) -> str | None:
+        comment = (obj.moderator_comment or "").strip()
+        return comment or None
+
+
+class ProductPublicResponseSerializer(serializers.ModelSerializer):
+    """OpenAPI ProductPublicResponse — GET с X-Service-Key (без seller-only полей у SKU)."""
+
+    category_id = serializers.UUIDField(read_only=True)
+    images = ProductImageSerializer(source='image_rows', many=True, read_only=True)
+    characteristics = ProductCharacteristicSerializer(
+        source='characteristic_rows',
+        many=True,
+        read_only=True,
+    )
+    skus = SKUPublicResponseSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = Product
+        fields = (
+            'id',
+            'seller_id',
+            'category_id',
+            'title',
+            'slug',
+            'description',
+            'status',
             'images',
             'characteristics',
             'skus',
@@ -319,27 +349,21 @@ class SKUCreateSerializer(serializers.Serializer):
             raise serializers.ValidationError({'name': 'name is required'})
         attrs['name'] = name
 
-        images = attrs.get('images') or []
-        if not images or not str(images[0].get('url', '')).strip():
-            raise serializers.ValidationError({'images': 'At least one image is required'})
-        attrs['image'] = str(images[0]['url']).strip()
-
         price = attrs.get('price')
-        if price is None or int(price) <= 0:
-            raise serializers.ValidationError(
-                {'price': 'price must be a positive integer (kopecks)'}
-            )
+        if price is None:
+            raise serializers.ValidationError({'price': 'This field is required.'})
         attrs['price'] = int(price)
+        if attrs['price'] < 0:
+            raise serializers.ValidationError({'price': 'price must be >= 0 (kopecks)'})
 
         cost_price = attrs.get('cost_price')
-        if cost_price is None:
-            attrs['cost_price'] = int(price)
-        elif int(cost_price) <= 0:
-            raise serializers.ValidationError(
-                {'cost_price': 'cost_price must be a positive integer (kopecks)'}
-            )
-        else:
-            attrs['cost_price'] = int(cost_price)
+        if cost_price is not None:
+            cost_price = int(cost_price)
+            if cost_price < 0:
+                raise serializers.ValidationError(
+                    {'cost_price': 'cost_price must be >= 0 (kopecks)'}
+                )
+            attrs['cost_price'] = cost_price
 
         discount = attrs.get('discount', 0)
         if discount is None or int(discount) < 0:
@@ -347,7 +371,9 @@ class SKUCreateSerializer(serializers.Serializer):
                 {'discount': 'discount must be a non-negative integer (kopecks)'}
             )
         attrs['discount'] = int(discount)
-        attrs['article'] = (attrs.get('article') or '').strip()
+
+        article = (attrs.get('article') or '').strip()
+        attrs['article'] = article or None
         return attrs
 
 
@@ -403,96 +429,78 @@ class ProductCreateSerializer(serializers.Serializer):
         return ProductResponseSerializer(instance, context=self.context).data
 
 
-class ProductUpdateSerializer(serializers.ModelSerializer):
-    """
-    PUT/PATCH /api/v1/products/{id} — правки карточки без смены статуса через это тело.
-    Поля опциональны (частичное обновление). Если переданы images/characteristics — списки заменяются целиком.
-    """
+class ProductUpdateSerializer(serializers.Serializer):
+    """PATCH /api/v1/products/{id} — OpenAPI ProductUpdate (все поля опциональны)."""
 
-    category = CategoryRefWriteSerializer(required=False)
-    images = ProductImageSerializer(many=True, required=False)
-    characteristics = ProductCharacteristicSerializer(many=True, required=False)
+    title = serializers.CharField(required=False, allow_blank=False, max_length=255)
+    description = serializers.CharField(required=False, max_length=5000)
+    category_id = serializers.UUIDField(required=False, allow_null=True)
+    characteristics = CharacteristicWriteSerializer(many=True, required=False, allow_null=True)
 
-    class Meta:
-        model = Product
-        fields = ('title', 'description', 'category', 'images', 'characteristics')
-        extra_kwargs = {
-            'title': {'required': False},
-            'description': {'required': False},
-        }
+    def validate_category_id(self, value):
+        if value is None:
+            return value
+        if not Category.objects.filter(pk=value).exists():
+            raise serializers.ValidationError('Category not found')
+        return value
 
     def update(self, instance: Product, validated_data: dict) -> Product:
-        category_data = validated_data.pop('category', None)
-        images_data = validated_data.pop('images', None)
-        characteristics_data = validated_data.pop('characteristics', None)
+        characteristics_data = validated_data.pop('characteristics', serializers.empty)
 
-        for attr, value in validated_data.items():
-            setattr(instance, attr, value)
-
-        if category_data is not None:
-            instance.category = category_data['id']
+        if 'title' in validated_data:
+            instance.title = validated_data['title']
+        if 'description' in validated_data:
+            instance.description = validated_data['description']
+        if 'category_id' in validated_data:
+            category_id = validated_data['category_id']
+            if category_id is not None:
+                instance.category_id = category_id
 
         instance.save()
 
-        if images_data is not None:
-            instance.image_rows.all().delete()
-            for row in images_data:
-                ProductImage.objects.create(product=instance, **row)
-
-        if characteristics_data is not None:
+        if characteristics_data is not serializers.empty:
             instance.characteristic_rows.all().delete()
-            for row in characteristics_data:
-                ProductCharacteristic.objects.create(product=instance, **row)
+            if characteristics_data:
+                for row in characteristics_data:
+                    ProductCharacteristic.objects.create(product=instance, **row)
 
         return instance
 
     def to_representation(self, instance: Product) -> dict:
-        return ProductDetailSerializer(instance, context=self.context).data
+        return ProductResponseSerializer(instance, context=self.context).data
 
 
-class SKUUpdateSerializer(serializers.ModelSerializer):
-    """PUT/PATCH /api/v1/skus/{id} — правки SKU (товар не переносится)."""
+class SKUUpdateSerializer(serializers.Serializer):
+    """PATCH /api/v1/skus/{id} — OpenAPI SKUUpdate (все поля опциональны)."""
 
-    active_quantity = serializers.IntegerField(required=False)
-    reserved_quantity = serializers.IntegerField(required=False)
+    name = serializers.CharField(required=False, max_length=255)
+    price = serializers.IntegerField(required=False, min_value=0)
     discount = serializers.IntegerField(required=False, min_value=0)
-    image = serializers.CharField(required=False, allow_blank=True)
-    characteristics = SKUCharacteristicSerializer(many=True, required=False)
-
-    class Meta:
-        model = SKU
-        fields = (
-            'name',
-            'price',
-            'cost_price',
-            'discount',
-            'image',
-            'active_quantity',
-            'reserved_quantity',
-            'characteristics',
-        )
-        extra_kwargs = {
-            'name': {'required': False},
-            'price': {'required': False},
-            'cost_price': {'required': False},
-        }
+    cost_price = serializers.IntegerField(required=False, allow_null=True, min_value=0)
+    article = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    characteristics = CharacteristicWriteSerializer(many=True, required=False, allow_null=True)
 
     def update(self, instance: SKU, validated_data: dict) -> SKU:
-        characteristics_data = validated_data.pop('characteristics', None)
+        characteristics_data = validated_data.pop('characteristics', serializers.empty)
+
+        if 'article' in validated_data:
+            article = (validated_data.get('article') or '').strip()
+            validated_data['article'] = article or None
 
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
 
-        if characteristics_data is not None:
+        if characteristics_data is not serializers.empty:
             instance.characteristic_rows.all().delete()
-            for row in characteristics_data:
-                SKUCharacteristic.objects.create(sku=instance, **row)
+            if characteristics_data:
+                for row in characteristics_data:
+                    SKUCharacteristic.objects.create(sku=instance, **row)
 
         return instance
 
     def to_representation(self, instance: SKU) -> dict:
-        return SKUSerializer(instance, context=self.context).data
+        return SKUResponseSerializer(instance, context=self.context).data
 
 
 class ProductListSerializer(serializers.ModelSerializer):
@@ -521,23 +529,8 @@ class B2CSKUCharacteristicSerializer(serializers.ModelSerializer):
         fields = ("name", "value")
 
 
-class B2CSKUSerializer(serializers.ModelSerializer):
-    active_quantity = serializers.IntegerField(read_only=True)
-    characteristics = B2CSKUCharacteristicSerializer(
-        source="characteristic_rows", many=True, read_only=True
-    )
-
-    class Meta:
-        model = SKU
-        fields = (
-            "id",
-            "name",
-            "price",
-            "discount",
-            "image",
-            "active_quantity",
-            "characteristics",
-        )
+class B2CSKUSerializer(SKUPublicResponseSerializer):
+    """Алиас для витрины B2C."""
 
 
 class B2CProductImageSerializer(serializers.ModelSerializer):

@@ -48,7 +48,7 @@ class CreateProductFlowTests(TestCase):
         self.assertEqual(data["category_id"], str(self.category.id))
         self.assertEqual(data["deleted"], False)
         self.assertIsNone(data["blocking_reason_id"])
-        self.assertEqual(data["moderator_comment"], "")
+        self.assertIsNone(data["moderator_comment"])
         self.assertIn("slug", data)
         self.assertEqual(len(data["images"]), 1)
         self.assertIn("id", data["images"][0])
