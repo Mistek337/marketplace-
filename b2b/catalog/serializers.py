@@ -191,55 +191,44 @@ class ProductDetailSerializer(serializers.ModelSerializer):
         ]
 
 
-class ProductCreateCategorySerializer(serializers.ModelSerializer):
+class ProductCreateSKUSerializer(serializers.ModelSerializer):
+    """Формат SKU в ответе POST /products (OpenAPI)."""
+
+    stock_quantity = serializers.IntegerField(source="active_quantity", read_only=True)
+
     class Meta:
-        model = Category
-        fields = ("id", "name")
-
-
-class ProductCreateImageSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = ProductImage
-        fields = ("url", "ordering")
-
-
-class ProductCreateCharacteristicSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = ProductCharacteristic
-        fields = ("name", "value")
+        model = SKU
+        fields = ("id", "name", "price", "stock_quantity", "article")
 
 
 class ProductCreateResponseSerializer(serializers.ModelSerializer):
-    category = ProductCreateCategorySerializer(read_only=True)
-    images = ProductCreateImageSerializer(source="image_rows", many=True, read_only=True)
-    characteristics = ProductCreateCharacteristicSerializer(
+    """Ответ 201 после POST /api/v1/products — как в OpenAPI/Swagger."""
+
+    images = ProductImageSerializer(source="image_rows", many=True, read_only=True)
+    characteristics = ProductCharacteristicSerializer(
         source="characteristic_rows",
         many=True,
         read_only=True,
     )
-    blocked = serializers.SerializerMethodField()
-    skus = serializers.SerializerMethodField()
+    skus = ProductCreateSKUSerializer(many=True, read_only=True)
+    created_at = serializers.DateTimeField(read_only=True)
+    updated_at = serializers.DateTimeField(read_only=True)
 
     class Meta:
         model = Product
         fields = (
             "id",
+            "seller_id",
+            "category_id",
             "title",
             "description",
             "status",
-            "deleted",
-            "blocked",
-            "category",
             "images",
             "characteristics",
             "skus",
+            "created_at",
+            "updated_at",
         )
-
-    def get_blocked(self, obj: Product) -> bool:
-        return obj.status in (Product.Status.BLOCKED, Product.Status.HARD_BLOCKED)
-
-    def get_skus(self, obj: Product) -> list:
-        return []
 
 
 class ProductRefWriteSerializer(serializers.Serializer):
@@ -311,14 +300,16 @@ class SKUCreateSerializer(serializers.ModelSerializer):
 class ProductCreateSerializer(serializers.ModelSerializer):
     """
     POST /api/v1/products — только карточка товара (без SKU).
-    Статус всегда UNMODERATED (поле status из запроса не используется).
+    Статус всегда CREATED; seller_id только из JWT.
     """
 
     title = serializers.CharField(required=True, allow_blank=False, max_length=255)
     description = serializers.CharField(required=True, allow_blank=False, max_length=5000)
-    category_id = serializers.PrimaryKeyRelatedField(
-        queryset=Category.objects.all(),
-        source='category',
+    category_id = serializers.UUIDField(
+        error_messages={
+            "invalid": "category_id must be a valid UUID",
+            "required": "This field is required.",
+        },
     )
     images = ProductImageSerializer(many=True, required=True)
     characteristics = ProductCharacteristicSerializer(many=True, required=False)
@@ -327,13 +318,18 @@ class ProductCreateSerializer(serializers.ModelSerializer):
         model = Product
         fields = ('title', 'description', 'category_id', 'images', 'characteristics')
 
+    def validate_category_id(self, value):
+        if not Category.objects.filter(pk=value).exists():
+            raise serializers.ValidationError("Category not found")
+        return value
+
     def validate_images(self, value):
         if not value:
             raise serializers.ValidationError("At least one image is required")
         return value
 
     def create(self, validated_data: dict) -> Product:
-        category = validated_data.pop('category')
+        category = Category.objects.get(pk=validated_data.pop("category_id"))
         images_data = validated_data.pop('images', [])
         characteristics_data = validated_data.pop('characteristics', [])
         request = self.context.get('request')
@@ -353,7 +349,7 @@ class ProductCreateSerializer(serializers.ModelSerializer):
         return product
 
     def to_representation(self, instance: Product) -> dict:
-        return ProductDetailSerializer(instance, context=self.context).data
+        return ProductCreateResponseSerializer(instance, context=self.context).data
 
 
 class ProductUpdateSerializer(serializers.ModelSerializer):

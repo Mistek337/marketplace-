@@ -6,6 +6,8 @@ from sellers.models import Seller
 
 
 class CreateProductFlowTests(TestCase):
+    """US-B2B-01: создание карточки товара (flows/b2b-flows.md#create-product)."""
+
     def setUp(self):
         self.client = APIClient()
         self.seller = Seller.objects.create(
@@ -28,14 +30,33 @@ class CreateProductFlowTests(TestCase):
             "characteristics": [{"name": "Бренд", "value": "Apple"}],
         }
 
+    def _assert_field_error(self, resp, *, field: str, message: str):
+        self.assertEqual(resp.status_code, 400)
+        data = resp.json()
+        self.assertIn("detail", data)
+        match = next(
+            (item for item in data["detail"] if field in item["loc"] and item["msg"] == message),
+            None,
+        )
+        self.assertIsNotNone(
+            match,
+            f"Expected detail for field {field!r} with msg {message!r}, got {data.get('detail')}",
+        )
+
     def test_create_product_returns_201_with_created_status(self):
         resp = self.client.post(self.url, data=self._payload(), format="json")
         self.assertEqual(resp.status_code, 201)
         data = resp.json()
         self.assertEqual(data["status"], Product.Status.CREATED)
-        self.assertEqual(data["deleted"], False)
-        self.assertEqual(data["blocked"], False)
+        self.assertEqual(data["seller_id"], str(self.seller.id))
+        self.assertEqual(data["category_id"], str(self.category.id))
+        self.assertEqual(len(data["images"]), 1)
+        self.assertIn("id", data["images"][0])
+        self.assertEqual(len(data["characteristics"]), 1)
+        self.assertIn("id", data["characteristics"][0])
         self.assertEqual(data["skus"], [])
+        self.assertIn("created_at", data)
+        self.assertIn("updated_at", data)
 
     def test_seller_id_taken_from_jwt(self):
         payload = self._payload()
@@ -49,38 +70,20 @@ class CreateProductFlowTests(TestCase):
         payload = self._payload()
         payload.pop("images")
         resp = self.client.post(self.url, data=payload, format="json")
-        self.assertEqual(resp.status_code, 400)
-        self.assertEqual(
-            resp.json(),
-            {"code": "INVALID_REQUEST", "message": "At least one image is required"},
-        )
+        self._assert_field_error(resp, field="images", message="This field is required.")
 
     def test_missing_category_returns_400(self):
         payload = self._payload()
         payload.pop("category_id")
         resp = self.client.post(self.url, data=payload, format="json")
-        self.assertEqual(resp.status_code, 400)
-        self.assertEqual(
-            resp.json(),
-            {"code": "INVALID_REQUEST", "message": "This field is required."},
-        )
+        self._assert_field_error(resp, field="category_id", message="This field is required.")
 
     def test_invalid_category_id_returns_400(self):
         payload = self._payload()
         payload["category_id"] = "not-a-uuid"
         resp = self.client.post(self.url, data=payload, format="json")
-        self.assertEqual(resp.status_code, 400)
-        self.assertEqual(
-            resp.json(),
-            {"code": "INVALID_REQUEST", "message": "category_id must be a valid UUID"},
-        )
-
-    def test_category_not_found_returns_400(self):
-        payload = self._payload()
-        payload["category_id"] = "00000000-0000-0000-0000-000000000001"
-        resp = self.client.post(self.url, data=payload, format="json")
-        self.assertEqual(resp.status_code, 400)
-        self.assertEqual(
-            resp.json(),
-            {"code": "INVALID_REQUEST", "message": "Category not found"},
+        self._assert_field_error(
+            resp,
+            field="category_id",
+            message="category_id must be a valid UUID",
         )

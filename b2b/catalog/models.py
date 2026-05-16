@@ -106,6 +106,7 @@ class SKU(models.Model):
     image = models.CharField(max_length=2048, default="")
     active_quantity = models.PositiveIntegerField(default=0)
     reserved_quantity = models.PositiveIntegerField(default=0)
+    article = models.CharField(max_length=255, blank=True, default="")
 
     class Meta:
         ordering = ['id']
