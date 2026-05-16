@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
 import os
+from datetime import timedelta
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -48,6 +49,7 @@ INSTALLED_APPS = [
     'accounts',
     'catalog',
     'favorites',
+    'cart',
 ]
 
 MIDDLEWARE = [
@@ -146,6 +148,12 @@ REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': (
         'rest_framework.permissions.AllowAny',
     ),
+    'EXCEPTION_HANDLER': 'marketplace.api_exceptions.openapi_exception_handler',
+}
+
+SIMPLE_JWT = {
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
 }
 
 B2B_BASE_URL = os.environ.get("B2B_BASE_URL", "http://127.0.0.1:8001")

@@ -2,14 +2,17 @@ from django.contrib.auth import get_user_model
 from rest_framework import permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from rest_framework_simplejwt.tokens import RefreshToken
+
+from cart.api_errors import error_body
+from cart.services import merge_guest_into_user, parse_session_header
 
 from .serializers import (
     RegisterRequestSerializer,
     LoginRequestSerializer,
-    UserResponseSerializer,
+    BuyerResponseSerializer,
     UpdateProfileRequestSerializer,
 )
+from .tokens import build_token_response
 
 
 User = get_user_model()
@@ -20,10 +23,25 @@ class RegisterView(APIView):
 
     def post(self, request):
         serializer = RegisterRequestSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        if not serializer.is_valid():
+            return Response(
+                error_body(
+                    code="VALIDATION_ERROR",
+                    message="Invalid registration data",
+                    details=serializer.errors,
+                ),
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        email = serializer.validated_data["email"]
+        if User.objects.filter(email__iexact=email).exists():
+            return Response(
+                error_body(code="CONFLICT", message="Email already registered"),
+                status=status.HTTP_409_CONFLICT,
+            )
+
         user = serializer.save()
-        response_data = UserResponseSerializer(user).data
-        return Response(response_data, status=status.HTTP_201_CREATED)
+        return Response(build_token_response(user), status=status.HTTP_201_CREATED)
 
 
 class LoginView(APIView):
@@ -31,7 +49,16 @@ class LoginView(APIView):
 
     def post(self, request):
         serializer = LoginRequestSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        if not serializer.is_valid():
+            return Response(
+                error_body(
+                    code="VALIDATION_ERROR",
+                    message="Invalid login data",
+                    details=serializer.errors,
+                ),
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         email = serializer.validated_data["email"]
         password = serializer.validated_data["password"]
 
@@ -39,40 +66,41 @@ class LoginView(APIView):
             user = User.objects.get(email=email)
         except User.DoesNotExist:
             return Response(
-                {"detail": "Invalid credentials"},
+                error_body(code="UNAUTHORIZED", message="Invalid credentials"),
                 status=status.HTTP_401_UNAUTHORIZED,
             )
 
         if not user.check_password(password):
             return Response(
-                {"detail": "Invalid credentials"},
+                error_body(code="UNAUTHORIZED", message="Invalid credentials"),
                 status=status.HTTP_401_UNAUTHORIZED,
             )
 
-        refresh = RefreshToken.for_user(user)
-        access_token = str(refresh.access_token)
+        guest_session_id = parse_session_header(request)
+        if guest_session_id is not None:
+            merge_guest_into_user(guest_session_id=guest_session_id, user=user)
 
-        return Response(
-            {
-                "access_token": access_token,
-                "token_type": "Bearer",
-                "user": UserResponseSerializer(user).data,
-            },
-            status=status.HTTP_200_OK,
-        )
+        return Response(build_token_response(user), status=status.HTTP_200_OK)
 
 
 class ProfileView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
-        return Response(UserResponseSerializer(request.user).data)
+        return Response(BuyerResponseSerializer(request.user).data)
 
     def patch(self, request):
         serializer = UpdateProfileRequestSerializer(
             request.user, data=request.data, partial=True
         )
-        serializer.is_valid(raise_exception=True)
+        if not serializer.is_valid():
+            return Response(
+                error_body(
+                    code="VALIDATION_ERROR",
+                    message="Invalid profile data",
+                    details=serializer.errors,
+                ),
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         user = serializer.save()
-        return Response(UserResponseSerializer(user).data)
-
+        return Response(BuyerResponseSerializer(user).data)

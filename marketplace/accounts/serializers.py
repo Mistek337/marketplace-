@@ -23,7 +23,10 @@ class LoginRequestSerializer(serializers.Serializer):
     password = serializers.CharField()
 
 
-class UserResponseSerializer(serializers.ModelSerializer):
+class BuyerResponseSerializer(serializers.ModelSerializer):
+    date_of_birth = serializers.SerializerMethodField()
+    updated_at = serializers.SerializerMethodField()
+
     class Meta:
         model = User
         fields = (
@@ -32,9 +35,25 @@ class UserResponseSerializer(serializers.ModelSerializer):
             "first_name",
             "last_name",
             "phone",
-            "role",
+            "date_of_birth",
+            "is_active",
             "created_at",
+            "updated_at",
         )
+        read_only_fields = fields
+
+    def get_date_of_birth(self, obj):
+        return None
+
+    def get_updated_at(self, obj):
+        return None
+
+
+class UserResponseSerializer(BuyerResponseSerializer):
+    """Обратная совместимость."""
+
+    class Meta(BuyerResponseSerializer.Meta):
+        fields = BuyerResponseSerializer.Meta.fields + ("role",)
 
 
 class UpdateProfileRequestSerializer(serializers.ModelSerializer):
