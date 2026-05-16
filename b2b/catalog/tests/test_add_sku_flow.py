@@ -93,6 +93,35 @@ class AddSKUFlowTests(TestCase):
         self.assertEqual(product.status, Product.Status.ON_MODERATION)
         emit_mock.assert_not_called()
 
+    def test_add_sku_to_other_sellers_product_returns_403(self):
+        other = Seller.objects.create(
+            email="other-sku@example.com",
+            password="hashed",
+            first_name="Other",
+            last_name="Seller",
+            company_name="Other Ltd",
+        )
+        product = Product.objects.create(
+            title="Other phone",
+            description="d",
+            category=self.category,
+            seller_id=other.id,
+            status=Product.Status.CREATED,
+        )
+
+        resp = self.client.post(self.url, self._payload(product_id=product.id), format="json")
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.json()["code"], FORBIDDEN)
+
+    def test_add_sku_to_unknown_product_returns_403(self):
+        resp = self.client.post(
+            self.url,
+            self._payload(product_id="00000000-0000-0000-0000-000000000099"),
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.json()["code"], FORBIDDEN)
+
     def test_add_sku_to_hard_blocked_returns_403(self):
         product = Product.objects.create(
             title="Blocked",
