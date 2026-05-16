@@ -4,12 +4,15 @@ from unittest.mock import patch
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
+from catalog.api_errors import FORBIDDEN, VALIDATION_ERROR
 from catalog.moderation_client import emit_product_created_event
 from catalog.models import Category, Product, SKU
 from sellers.models import Seller
 
 
 class AddSKUFlowTests(TestCase):
+    """US-B2B-02 / OpenAPI POST /api/v1/skus."""
+
     def setUp(self):
         self.client = APIClient()
         self.seller = Seller.objects.create(
@@ -23,14 +26,14 @@ class AddSKUFlowTests(TestCase):
         self.category = Category.objects.create(name="Категория")
         self.url = "/api/v1/skus/"
 
-    def _payload(self, *, product_id, image="https://example.com/sku.jpg"):
+    def _payload(self, *, product_id, image_url="https://example.com/sku.jpg"):
         return {
             "product_id": str(product_id),
             "name": "256GB Black",
             "price": 12_999_000,
             "cost_price": 9_500_000,
             "discount": 0,
-            "image": image,
+            "images": [{"url": image_url, "ordering": 0}],
             "characteristics": [
                 {"name": "Цвет", "value": "Чёрный"},
                 {"name": "Объём памяти", "value": "256 ГБ"},
@@ -49,6 +52,10 @@ class AddSKUFlowTests(TestCase):
 
         resp = self.client.post(self.url, self._payload(product_id=product.id), format="json")
         self.assertEqual(resp.status_code, 201)
+        data = resp.json()
+        self.assertIn("id", data)
+        self.assertEqual(data["product_id"], str(product.id))
+        self.assertEqual(len(data["images"]), 1)
 
         product.refresh_from_db()
         self.assertEqual(product.status, Product.Status.ON_MODERATION)
@@ -93,10 +100,14 @@ class AddSKUFlowTests(TestCase):
         self.assertEqual(resp.status_code, 403)
         self.assertEqual(
             resp.json(),
-            {"code": "FORBIDDEN", "message": "Cannot add SKU to hard-blocked product"},
+            {
+                "code": FORBIDDEN,
+                "message": "Cannot add SKU to hard-blocked product",
+            },
         )
 
     def test_missing_image_returns_400(self):
+        """DoD-имя теста; HTTP 422 по unified OpenAPI ValidationError."""
         product = Product.objects.create(
             title="Phone",
             description="d",
@@ -104,10 +115,13 @@ class AddSKUFlowTests(TestCase):
             seller_id=self.seller.id,
             status=Product.Status.CREATED,
         )
-        payload = self._payload(product_id=product.id, image="")
+        payload = self._payload(product_id=product.id)
+        payload["images"] = []
         resp = self.client.post(self.url, payload, format="json")
-        self.assertEqual(resp.status_code, 400)
-        self.assertEqual(resp.json(), {"code": "INVALID_REQUEST", "message": "image is required"})
+        self.assertEqual(resp.status_code, 422)
+        data = resp.json()
+        self.assertEqual(data["code"], VALIDATION_ERROR)
+        self.assertIn("images", data.get("details", {}))
 
     @override_settings(
         MODERATION_BASE_URL="https://moderation.example",

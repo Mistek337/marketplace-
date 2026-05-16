@@ -5,6 +5,9 @@ from __future__ import annotations
 from typing import Any
 
 VALIDATION_ERROR = "VALIDATION_ERROR"
+FORBIDDEN = "FORBIDDEN"
+NOT_FOUND = "NOT_FOUND"
+SERVICE_UNAVAILABLE = "SERVICE_UNAVAILABLE"
 
 
 def error_body(*, code: str, message: str, details: dict[str, Any] | None = None) -> dict[str, Any]:

@@ -10,7 +10,13 @@ from sellers.auth import SellerJWTAuthentication
 
 from .models import Category, Product, SKU
 from .moderation_client import ModerationClientError, emit_product_created_event
-from .api_errors import drf_validation_error
+from .api_errors import (
+    FORBIDDEN,
+    NOT_FOUND,
+    SERVICE_UNAVAILABLE,
+    drf_validation_error,
+    error_body,
+)
 from .serializers import (
     B2CProductSerializer,
     CategoryCreateSerializer,
@@ -24,6 +30,7 @@ from .serializers import (
     ProductListSerializer,
     ProductUpdateSerializer,
     SKUCreateSerializer,
+    SKUResponseSerializer,
     SKUSerializer,
     SKUUpdateSerializer,
 )
@@ -298,11 +305,9 @@ class SKUCreateAPIView(generics.CreateAPIView):
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         if not serializer.is_valid():
-            field, err = next(iter(serializer.errors.items()))
-            message = err[0] if isinstance(err, list) else str(err)
             return Response(
-                {"code": "INVALID_REQUEST", "message": message},
-                status=status.HTTP_400_BAD_REQUEST,
+                drf_validation_error(serializer.errors),
+                status=status.HTTP_422_UNPROCESSABLE_ENTITY,
             )
 
         data = serializer.validated_data
@@ -311,16 +316,16 @@ class SKUCreateAPIView(generics.CreateAPIView):
                 product = Product.objects.select_for_update().filter(id=data["product_id"]).first()
                 if product is None:
                     return Response(
-                        {"code": "NOT_FOUND", "message": "Product not found"},
+                        error_body(code=NOT_FOUND, message="Product not found"),
                         status=status.HTTP_404_NOT_FOUND,
                     )
 
                 if product.status == Product.Status.HARD_BLOCKED:
                     return Response(
-                        {
-                            "code": "FORBIDDEN",
-                            "message": "Cannot add SKU to hard-blocked product",
-                        },
+                        error_body(
+                            code=FORBIDDEN,
+                            message="Cannot add SKU to hard-blocked product",
+                        ),
                         status=status.HTTP_403_FORBIDDEN,
                     )
 
@@ -333,6 +338,7 @@ class SKUCreateAPIView(generics.CreateAPIView):
                     cost_price=data["cost_price"],
                     discount=data.get("discount", 0),
                     image=data["image"],
+                    article=data.get("article", ""),
                     active_quantity=0,
                     reserved_quantity=0,
                 )
@@ -345,12 +351,13 @@ class SKUCreateAPIView(generics.CreateAPIView):
                     emit_product_created_event(product_id=product.id, seller_id=product.seller_id)
         except ModerationClientError:
             return Response(
-                {"code": "SERVICE_UNAVAILABLE", "message": "Moderation unavailable"},
+                error_body(code=SERVICE_UNAVAILABLE, message="Moderation unavailable"),
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
 
+        sku.refresh_from_db()
         return Response(
-            self.get_serializer(sku).data,
+            SKUResponseSerializer(sku).data,
             status=status.HTTP_201_CREATED,
         )
 
