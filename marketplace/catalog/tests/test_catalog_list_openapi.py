@@ -85,13 +85,10 @@ def test_catalog_similar_returns_card_array(client):
             {
                 "id": str(sim_id),
                 "title": "B",
-                "status": "MODERATED",
-                "deleted": False,
                 "min_price": 200,
                 "cover_image": "https://cdn/x.jpg",
             }
         ]
-        inst.get_categories.return_value = []
         response = client.get(f"/api/v1/catalog/products/{pid}/similar?limit=5")
 
     assert response.status_code == 200

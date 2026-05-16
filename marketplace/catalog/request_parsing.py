@@ -21,6 +21,25 @@ _OPENAPI_TO_B2B_SORT = {
 MIN_SEARCH_LENGTH = 3
 MAX_SEARCH_LENGTH = 200
 
+SIMILAR_LIMIT_DEFAULT = 10
+SIMILAR_LIMIT_MIN = 1
+SIMILAR_LIMIT_MAX = 50
+
+
+def parse_similar_limit_param(request: Request) -> int:
+    """
+    OpenAPI GET .../similar: limit default 10, min 1, max 50.
+    Невалидное значение → default (в схеме для limit нет 4xx).
+    """
+    raw = request.query_params.get("limit")
+    if raw is None or str(raw).strip() == "":
+        return SIMILAR_LIMIT_DEFAULT
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return SIMILAR_LIMIT_DEFAULT
+    return max(SIMILAR_LIMIT_MIN, min(value, SIMILAR_LIMIT_MAX))
+
 
 def parse_catalog_list_params(request: Request):
     """
