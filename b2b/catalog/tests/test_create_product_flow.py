@@ -6,7 +6,7 @@ from sellers.models import Seller
 
 
 class CreateProductFlowTests(TestCase):
-    """US-B2B-01: создание карточки товара (flows/b2b-flows.md#create-product)."""
+    """US-B2B-01 / OpenAPI POST /api/v1/products."""
 
     def setUp(self):
         self.client = APIClient()
@@ -30,18 +30,14 @@ class CreateProductFlowTests(TestCase):
             "characteristics": [{"name": "Бренд", "value": "Apple"}],
         }
 
-    def _assert_field_error(self, resp, *, field: str, message: str):
-        self.assertEqual(resp.status_code, 400)
+    def _assert_validation_error(self, resp, *, field: str | None = None):
+        self.assertEqual(resp.status_code, 422)
         data = resp.json()
-        self.assertIn("detail", data)
-        match = next(
-            (item for item in data["detail"] if field in item["loc"] and item["msg"] == message),
-            None,
-        )
-        self.assertIsNotNone(
-            match,
-            f"Expected detail for field {field!r} with msg {message!r}, got {data.get('detail')}",
-        )
+        self.assertEqual(data["code"], "VALIDATION_ERROR")
+        self.assertIn("message", data)
+        self.assertIn("details", data)
+        if field is not None:
+            self.assertIn(field, data["details"])
 
     def test_create_product_returns_201_with_created_status(self):
         resp = self.client.post(self.url, data=self._payload(), format="json")
@@ -50,6 +46,10 @@ class CreateProductFlowTests(TestCase):
         self.assertEqual(data["status"], Product.Status.CREATED)
         self.assertEqual(data["seller_id"], str(self.seller.id))
         self.assertEqual(data["category_id"], str(self.category.id))
+        self.assertEqual(data["deleted"], False)
+        self.assertIsNone(data["blocking_reason_id"])
+        self.assertEqual(data["moderator_comment"], "")
+        self.assertIn("slug", data)
         self.assertEqual(len(data["images"]), 1)
         self.assertIn("id", data["images"][0])
         self.assertEqual(len(data["characteristics"]), 1)
@@ -66,24 +66,21 @@ class CreateProductFlowTests(TestCase):
         product = Product.objects.get(title="iPhone 15")
         self.assertEqual(str(product.seller_id), str(self.seller.id))
 
-    def test_missing_images_returns_400(self):
+    def test_missing_images_returns_201_with_empty_images(self):
         payload = self._payload()
         payload.pop("images")
         resp = self.client.post(self.url, data=payload, format="json")
-        self._assert_field_error(resp, field="images", message="This field is required.")
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(resp.json()["images"], [])
 
-    def test_missing_category_returns_400(self):
+    def test_missing_category_returns_422(self):
         payload = self._payload()
         payload.pop("category_id")
         resp = self.client.post(self.url, data=payload, format="json")
-        self._assert_field_error(resp, field="category_id", message="This field is required.")
+        self._assert_validation_error(resp, field="category_id")
 
-    def test_invalid_category_id_returns_400(self):
+    def test_invalid_category_id_returns_422(self):
         payload = self._payload()
         payload["category_id"] = "not-a-uuid"
         resp = self.client.post(self.url, data=payload, format="json")
-        self._assert_field_error(
-            resp,
-            field="category_id",
-            message="category_id must be a valid UUID",
-        )
+        self._assert_validation_error(resp, field="category_id")

@@ -2,6 +2,7 @@ import uuid
 
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.utils.text import slugify
 
 
 class Category(models.Model):
@@ -42,7 +43,10 @@ class Product(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     seller_id = models.UUIDField(null=True, blank=True, db_index=True)
     title = models.CharField(max_length=512)
+    slug = models.SlugField(max_length=255, blank=True, default="")
     description = models.TextField(blank=True)
+    blocking_reason_id = models.UUIDField(null=True, blank=True)
+    moderator_comment = models.TextField(blank=True, default="")
     status = models.CharField(
         max_length=32,
         choices=Status.choices,
@@ -63,8 +67,17 @@ class Product(models.Model):
     def __str__(self) -> str:
         return self.title
 
+    def ensure_slug(self) -> None:
+        if self.slug:
+            return
+        base = slugify(self.title) or "product"
+        self.slug = base[:240]
+        if Product.objects.filter(slug=self.slug).exclude(pk=self.pk).exists():
+            self.slug = f"{self.slug[:220]}-{str(self.pk)[:8]}"
+
 
 class ProductCharacteristic(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     product = models.ForeignKey(
         Product,
         on_delete=models.CASCADE,
@@ -78,6 +91,7 @@ class ProductCharacteristic(models.Model):
 
 
 class ProductImage(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     product = models.ForeignKey(
         Product,
         on_delete=models.CASCADE,
@@ -107,9 +121,15 @@ class SKU(models.Model):
     active_quantity = models.PositiveIntegerField(default=0)
     reserved_quantity = models.PositiveIntegerField(default=0)
     article = models.CharField(max_length=255, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ['id']
+
+    @property
+    def stock_quantity(self) -> int:
+        return self.active_quantity + self.reserved_quantity
 
     def __str__(self) -> str:
         return f'{self.product_id}:{self.name}'

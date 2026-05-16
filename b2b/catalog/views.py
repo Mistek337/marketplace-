@@ -10,7 +10,7 @@ from sellers.auth import SellerJWTAuthentication
 
 from .models import Category, Product, SKU
 from .moderation_client import ModerationClientError, emit_product_created_event
-from .validation_errors import validation_error_response
+from .api_errors import drf_validation_error
 from .serializers import (
     B2CProductSerializer,
     CategoryCreateSerializer,
@@ -19,7 +19,7 @@ from .serializers import (
     CategoryWithChildrenResponseSerializer,
     ProductMyListItemSerializer,
     ProductCreateSerializer,
-    ProductCreateResponseSerializer,
+    ProductResponseSerializer,
     ProductDetailSerializer,
     ProductListSerializer,
     ProductUpdateSerializer,
@@ -125,12 +125,12 @@ class ProductListCreateAPIView(generics.ListCreateAPIView):
         serializer = self.get_serializer(data=request.data)
         if not serializer.is_valid():
             return Response(
-                validation_error_response(serializer.errors, request_data=request.data),
-                status=status.HTTP_400_BAD_REQUEST,
+                drf_validation_error(serializer.errors),
+                status=status.HTTP_422_UNPROCESSABLE_ENTITY,
             )
 
         product = serializer.save()
-        out = ProductCreateResponseSerializer(product)
+        out = ProductResponseSerializer(product)
         return Response(out.data, status=status.HTTP_201_CREATED)
 
     def list(self, request, *args, **kwargs):
