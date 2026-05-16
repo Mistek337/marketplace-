@@ -296,30 +296,22 @@ class ProductRefWriteSerializer(serializers.Serializer):
     id = serializers.PrimaryKeyRelatedField(queryset=Product.objects.all())
 
 
-class SKUCreateSerializer(serializers.ModelSerializer):
-    """
-    POST /api/v1/skus — создать SKU у уже существующего товара.
-    """
+class SKUImageCreateSerializer(serializers.Serializer):
+    url = serializers.CharField(max_length=2048)
+    ordering = serializers.IntegerField(default=0, required=False, min_value=0)
+
+
+class SKUCreateSerializer(serializers.Serializer):
+    """POST /api/v1/skus — OpenAPI SKUCreate."""
 
     product_id = serializers.UUIDField()
-    name = serializers.CharField(max_length=255, required=False, allow_blank=True)
-    price = serializers.IntegerField(required=False)
-    cost_price = serializers.IntegerField(required=False)
-    discount = serializers.IntegerField(required=False, default=0)
-    image = serializers.CharField(required=False, allow_blank=True)
-    characteristics = SKUCharacteristicSerializer(many=True, required=False)
-
-    class Meta:
-        model = SKU
-        fields = (
-            'product_id',
-            'name',
-            'price',
-            'cost_price',
-            'discount',
-            'image',
-            'characteristics',
-        )
+    name = serializers.CharField(max_length=255)
+    price = serializers.IntegerField(min_value=0)
+    discount = serializers.IntegerField(required=False, default=0, min_value=0)
+    cost_price = serializers.IntegerField(required=False, allow_null=True, min_value=0)
+    article = serializers.CharField(required=False, allow_blank=True, max_length=255, default="")
+    images = SKUImageCreateSerializer(many=True, required=False, default=list)
+    characteristics = CharacteristicWriteSerializer(many=True, required=False, default=list)
 
     def validate(self, attrs: dict) -> dict:
         name = (attrs.get('name') or '').strip()
@@ -327,22 +319,27 @@ class SKUCreateSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({'name': 'name is required'})
         attrs['name'] = name
 
-        image = (attrs.get('image') or '').strip()
-        if not image:
-            raise serializers.ValidationError({'image': 'image is required'})
-        attrs['image'] = image
+        images = attrs.get('images') or []
+        if not images or not str(images[0].get('url', '')).strip():
+            raise serializers.ValidationError({'images': 'At least one image is required'})
+        attrs['image'] = str(images[0]['url']).strip()
 
         price = attrs.get('price')
         if price is None or int(price) <= 0:
             raise serializers.ValidationError(
                 {'price': 'price must be a positive integer (kopecks)'}
             )
+        attrs['price'] = int(price)
 
         cost_price = attrs.get('cost_price')
-        if cost_price is None or int(cost_price) <= 0:
+        if cost_price is None:
+            attrs['cost_price'] = int(price)
+        elif int(cost_price) <= 0:
             raise serializers.ValidationError(
                 {'cost_price': 'cost_price must be a positive integer (kopecks)'}
             )
+        else:
+            attrs['cost_price'] = int(cost_price)
 
         discount = attrs.get('discount', 0)
         if discount is None or int(discount) < 0:
@@ -350,10 +347,8 @@ class SKUCreateSerializer(serializers.ModelSerializer):
                 {'discount': 'discount must be a non-negative integer (kopecks)'}
             )
         attrs['discount'] = int(discount)
+        attrs['article'] = (attrs.get('article') or '').strip()
         return attrs
-
-    def to_representation(self, instance: SKU) -> dict:
-        return SKUSerializer(instance, context=self.context).data
 
 
 class ProductCreateSerializer(serializers.Serializer):
