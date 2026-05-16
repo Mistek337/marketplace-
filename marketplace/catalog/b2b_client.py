@@ -73,17 +73,15 @@ class B2BClient:
                 raise first
 
     def get_products(self, *, limit, offset, category_id=None, filters=None, sort=None, search=None, ids=None):
-        # B2B: GET /api/v1/products/?category=<uuid>&… — параметр категории называется category.
         data = self._get(
-            self._api_path("products"),
+            self._api_path("public", "products"),
             query={
                 "limit": limit,
                 "offset": offset,
-                "category": category_id,
+                "category_id": category_id,
                 "filters": filters,
                 "sort": sort,
                 "search": search,
-                "ids": ids,
             },
         )
         if isinstance(data, dict) and "items" in data:
@@ -97,19 +95,58 @@ class B2BClient:
             }
         return {"total_count": 0, "limit": limit, "offset": offset, "items": []}
 
+    def batch_public_products(self, product_ids):
+        return self._post_json(
+            self._api_path("public", "products", "batch"),
+            {"product_ids": [str(pid) for pid in product_ids]},
+        )
+
+    def _post_json(self, path, payload):
+        body = json.dumps(payload).encode("utf-8")
+        req = request.Request(
+            self._build_url(path),
+            data=body,
+            method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+        token = getattr(settings, "B2B_SERVICE_TOKEN", "")
+        if token:
+            req.add_header("Authorization", f"Bearer {token}")
+        service_key = getattr(settings, "B2B_SERVICE_KEY", "") or ""
+        if service_key:
+            req.add_header("X-Service-Key", service_key)
+        req.add_header("Accept", "application/json")
+
+        try:
+            with request.urlopen(req, timeout=self.timeout) as resp:
+                raw = resp.read().decode("utf-8") if resp.length != 0 else ""
+                return json.loads(raw) if raw else []
+        except error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="ignore")
+            raise B2BClientError(exc.code, detail or "B2B HTTP error") from exc
+        except error.URLError as exc:
+            raise B2BClientError(503, f"B2B unavailable: {exc}") from exc
+
     def get_product(self, product_id):
-        return self._get(self._api_path("products", str(product_id)))
+        return self._get(self._api_path("public", "products", str(product_id)))
+
+    def get_similar_products(self, product_id, *, limit=10):
+        data = self._get(
+            self._api_path("public", "products", str(product_id), "similar"),
+            query={"limit": limit},
+        )
+        return data if isinstance(data, list) else []
+
+    def get_public_sku(self, sku_id):
+        return self._get(self._api_path("public", "skus", str(sku_id)))
 
     def get_product_skus(self, product_id):
         product = self.get_product(product_id)
         return product.get("skus", []) if isinstance(product, dict) else []
 
     def get_product_sku(self, product_id, sku_id):
-        skus = self.get_product_skus(product_id)
-        for sku in skus:
-            if str(sku.get("id")) == str(sku_id):
-                return sku
-        raise B2BClientError(404, "SKU not found")
+        del product_id
+        return self.get_public_sku(sku_id)
 
     def get_categories(self):
         data = self._get(self._api_path("categories"))

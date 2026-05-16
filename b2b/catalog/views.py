@@ -5,20 +5,21 @@ from rest_framework import generics, status
 from rest_framework import permissions
 from rest_framework.response import Response
 from django.conf import settings
-from django.db.models import Exists, OuterRef, Q, Min
+from django.db.models import Min
 
 from sellers.auth import SellerJWTAuthentication
 
 from .models import Category, Product, SKU, SKUImage
+from .public_catalog import public_detail_queryset
 from .moderation_client import emit_product_created_event, emit_product_edited_event
 from .api_errors import (
     FORBIDDEN,
     NOT_FOUND,
+    UNAUTHORIZED,
     drf_validation_error,
     error_body,
 )
 from .serializers import (
-    B2CProductSerializer,
     CategoryCreateSerializer,
     CategoryFlatSerializer,
     CategoryUpdateSerializer,
@@ -27,7 +28,7 @@ from .serializers import (
     ProductCreateSerializer,
     ProductResponseSerializer,
     ProductPublicResponseSerializer,
-    ProductListSerializer,
+    ProductShortResponseSerializer,
     ProductUpdateSerializer,
     SKUCreateSerializer,
     SKUResponseSerializer,
@@ -158,7 +159,7 @@ class ProductListCreateAPIView(generics.ListCreateAPIView):
     def get_serializer_class(self):
         if self.request.method == 'POST':
             return ProductCreateSerializer
-        return ProductListSerializer
+        return ProductShortResponseSerializer
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
@@ -173,66 +174,46 @@ class ProductListCreateAPIView(generics.ListCreateAPIView):
         return Response(out.data, status=status.HTTP_201_CREATED)
 
     def list(self, request, *args, **kwargs):
-        service_key = request.headers.get("X-Service-Key")
-        expected = getattr(settings, "B2C_TO_B2B_KEY", "")
-        if not expected or service_key != expected:
-            return Response(status=status.HTTP_403_FORBIDDEN)
+        if not request.user or not getattr(request.user, "is_authenticated", False):
+            return Response(
+                error_body(code=UNAUTHORIZED, message="Authentication required"),
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
 
         try:
             limit = int(request.query_params.get("limit", 20))
             offset = int(request.query_params.get("offset", 0))
         except ValueError:
             return Response(
-                {"detail": [{"msg": "Invalid pagination parameters"}]},
+                drf_validation_error(
+                    {"limit": "Invalid pagination parameters"},
+                ),
                 status=status.HTTP_422_UNPROCESSABLE_ENTITY,
             )
         limit = max(1, min(limit, 100))
         offset = max(0, offset)
 
-        qs = Product.objects.select_related("category").prefetch_related(
-            "image_rows",
-            "characteristic_rows",
-            "skus__characteristic_rows",
-            "skus__image_rows",
+        qs = (
+            Product.objects.filter(seller_id=request.user.id)
+            .prefetch_related("image_rows", "skus")
+            .annotate(min_price=Min("skus__price"))
+            .order_by("-created_at")
         )
-
-        if getattr(settings, "CATALOG_DEV_VISIBILITY", False):
+        include_deleted = str(
+            request.query_params.get("include_deleted", "false")
+        ).lower() in ("1", "true", "yes")
+        if not include_deleted:
             qs = qs.filter(deleted=False)
-        else:
-            visible_sku_qs = SKU.objects.filter(product_id=OuterRef("pk"), active_quantity__gt=0)
-            qs = qs.annotate(has_stock=Exists(visible_sku_qs)).filter(
-                status=Product.Status.MODERATED,
-                deleted=False,
-                has_stock=True,
-            )
 
-        category = request.query_params.get("category")
-        if category:
-            qs = qs.filter(category_id=category)
-
-        search = request.query_params.get("search")
-        if search:
-            qs = qs.filter(Q(title__icontains=search) | Q(description__icontains=search))
-
-        ids = request.query_params.get("ids")
-        if ids:
-            raw_ids = [x.strip() for x in ids.split(",") if x.strip()]
-            qs = qs.filter(id__in=raw_ids)
-
-        sort = request.query_params.get("sort")
-        if sort in ("price_asc", "price_desc"):
-            qs = qs.annotate(min_price=Min("skus__price"))
-            qs = qs.order_by("min_price" if sort == "price_asc" else "-min_price")
-        elif sort == "date_desc":
-            qs = qs.order_by("-created_at")
-        else:
-            qs = qs.order_by("-created_at")
+        status_filter = request.query_params.get("status")
+        if status_filter:
+            qs = qs.filter(status=status_filter)
 
         total_count = qs.count()
         items = qs[offset : offset + limit]
         return Response(
             {
-                "items": B2CProductSerializer(items, many=True).data,
+                "items": ProductShortResponseSerializer(items, many=True).data,
                 "total_count": total_count,
                 "limit": limit,
                 "offset": offset,
@@ -310,6 +291,10 @@ class ProductRetrieveUpdateAPIView(generics.RetrieveUpdateAPIView):
         )
         if is_owner:
             return product
+        service_key = request.headers.get("X-Service-Key")
+        b2c_key = getattr(settings, "B2C_TO_B2B_KEY", "") or ""
+        if b2c_key and service_key == b2c_key:
+            return public_detail_queryset().filter(id=product_id).first()
         if _valid_service_key(request):
             return product
         return None

@@ -116,6 +116,16 @@ class SKUCharacteristicResponseSerializer(serializers.ModelSerializer):
         fields = ('id', 'name', 'value')
 
 
+class ProductCharacteristicSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ProductCharacteristic
+        fields = ('id', 'name', 'value')
+
+
+class CharacteristicResponseSerializer(ProductCharacteristicSerializer):
+    """OpenAPI CharacteristicResponse (product characteristics)."""
+
+
 class SKUImageSerializer(serializers.ModelSerializer):
     class Meta:
         model = SKUImage
@@ -183,12 +193,6 @@ class SKUPublicResponseSerializer(serializers.ModelSerializer):
             'images',
             'characteristics',
         )
-
-
-class ProductCharacteristicSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = ProductCharacteristic
-        fields = ('id', 'name', 'value')
 
 
 class ProductDetailSerializer(serializers.ModelSerializer):
@@ -296,7 +300,7 @@ class ProductPublicResponseSerializer(serializers.ModelSerializer):
 
     category_id = serializers.UUIDField(read_only=True)
     images = ProductImageSerializer(source='image_rows', many=True, read_only=True)
-    characteristics = ProductCharacteristicSerializer(
+    characteristics = CharacteristicResponseSerializer(
         source='characteristic_rows',
         many=True,
         read_only=True,
@@ -562,6 +566,83 @@ class SKUUpdateSerializer(serializers.Serializer):
 
     def to_representation(self, instance: SKU) -> dict:
         return SKUResponseSerializer(instance, context=self.context).data
+
+
+class ProductShortResponseSerializer(serializers.ModelSerializer):
+    """OpenAPI ProductShortResponse — GET /api/v1/products (seller list)."""
+
+    category_id = serializers.UUIDField(read_only=True)
+    min_price = serializers.SerializerMethodField()
+    cover_image = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Product
+        fields = (
+            "id",
+            "title",
+            "slug",
+            "status",
+            "category_id",
+            "deleted",
+            "created_at",
+            "min_price",
+            "cover_image",
+        )
+
+    def get_min_price(self, obj: Product) -> int | None:
+        annotated = getattr(obj, "min_price", None)
+        if annotated is not None:
+            return int(annotated)
+        prices = [int(s.price) for s in obj.skus.all() if s.price is not None]
+        return min(prices) if prices else None
+
+    def get_cover_image(self, obj: Product) -> str | None:
+        images = list(obj.image_rows.all())
+        if not images:
+            return None
+        return images[0].url
+
+
+class ProductPublicShortResponseSerializer(serializers.ModelSerializer):
+    """OpenAPI ProductPublicShortResponse — GET /api/v1/public/products."""
+
+    category_id = serializers.UUIDField(read_only=True)
+    min_price = serializers.SerializerMethodField()
+    cover_image = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Product
+        fields = (
+            "id",
+            "title",
+            "slug",
+            "status",
+            "category_id",
+            "min_price",
+            "cover_image",
+            "created_at",
+        )
+
+    def get_min_price(self, obj: Product) -> int:
+        annotated = getattr(obj, "min_price", None)
+        if annotated is not None:
+            return int(annotated)
+        prices = [int(s.price) for s in obj.skus.all() if s.price is not None]
+        return min(prices) if prices else 0
+
+    def get_cover_image(self, obj: Product) -> str | None:
+        images = list(obj.image_rows.all())
+        if not images:
+            return None
+        return images[0].url
+
+
+class PublicProductBatchRequestSerializer(serializers.Serializer):
+    product_ids = serializers.ListField(
+        child=serializers.UUIDField(),
+        allow_empty=False,
+        max_length=100,
+    )
 
 
 class ProductListSerializer(serializers.ModelSerializer):

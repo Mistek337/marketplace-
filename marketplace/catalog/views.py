@@ -33,16 +33,28 @@ def _map_b2b_error(exc):
 
 
 def _to_similar_item(product):
+    if product.get("min_price") is not None or product.get("cover_image") is not None:
+        return {
+            "id": product.get("id"),
+            "title": product.get("title"),
+            "image": product.get("cover_image"),
+            "price": product.get("min_price"),
+            "in_stock": True,
+            "is_in_cart": False,
+        }
     skus = product.get("skus") or []
     first_sku = skus[0] if skus else {}
     images = product.get("images") or []
     image = images[0].get("url") if images else None
+    qty = first_sku.get("active_quantity")
+    if qty is None:
+        qty = first_sku.get("activeQuantity", 0)
     return {
         "id": product.get("id"),
         "title": product.get("title"),
         "image": image,
         "price": first_sku.get("price"),
-        "in_stock": bool(first_sku.get("activeQuantity", 0) > 0),
+        "in_stock": bool(int(qty or 0) > 0),
         "is_in_cart": False,
     }
 
@@ -94,13 +106,21 @@ def _strip_forbidden_sku_fields(card: dict) -> dict:
     return card
 
 
-def _to_b2c_card(product):
+def _product_category_id(product):
+    category_id = product.get("category_id")
+    if category_id is not None:
+        return category_id
+    return (product.get("category") or {}).get("id")
+
+
+def _to_b2c_card(product, *, category_name=None):
     placeholder = getattr(
         settings,
         "B2C_IMAGE_PLACEHOLDER",
         "https://via.placeholder.com/320x320?text=No+Image",
     )
     skus = [_public_sku_for_card(sku, placeholder=placeholder) for sku in (product.get("skus") or [])]
+    category_id = _product_category_id(product)
 
     return _strip_forbidden_sku_fields(
         {
@@ -110,8 +130,8 @@ def _to_b2c_card(product):
             "description": product.get("description"),
             "status": product.get("status"),
             "category": {
-                "id": (product.get("category") or {}).get("id"),
-                "name": (product.get("category") or {}).get("name"),
+                "id": category_id,
+                "name": category_name or (product.get("category") or {}).get("name") or "",
             },
             "images": [
                 {"url": row.get("url"), "ordering": row.get("ordering", 0)}
@@ -527,12 +547,12 @@ class ProductSimilarView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        limit = max(1, min(limit, 100))
+        limit = max(1, min(limit, 50))
         offset = max(0, offset)
 
         client = B2BClient()
         try:
-            current = client.get_product(product_id)
+            pool = client.get_similar_products(product_id, limit=min(50, limit + offset))
         except B2BClientError as exc:
             if exc.status_code == 404:
                 return Response(
@@ -541,44 +561,13 @@ class ProductSimilarView(APIView):
                 )
             return _map_b2b_error(exc)
 
-        current_category = (current.get("category") or {}).get("id")
-        if not current_category:
-            return Response(
-                {"message": "Nonexistent category id"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        try:
-            listing = client.get_products(limit=1000, offset=0, category_id=None)
-        except B2BClientError as exc:
-            return _map_b2b_error(exc)
-
-        pool = listing.get("items", []) if isinstance(listing, dict) else []
-        same_category = [
-            item
-            for item in pool
-            if str(item.get("id")) != str(product_id)
-            and ((item.get("category") or {}).get("id") == current_category)
-        ]
-
-        total_count = len(same_category)
-        page = same_category[offset : offset + limit]
-
-        items = []
-        for short_item in page:
-            pid = short_item.get("id")
-            if not pid:
-                continue
-            try:
-                full_product = client.get_product(pid)
-            except B2BClientError:
-                continue
-            items.append(_to_similar_item(full_product))
+        page = pool[offset : offset + limit]
+        items = [_to_similar_item(row) for row in page if isinstance(row, dict)]
 
         return Response(
             {
                 "items": items,
-                "total_count": total_count,
+                "total_count": len(pool),
                 "limit": limit,
                 "offset": offset,
             }
@@ -615,24 +604,19 @@ class CategoryFiltersView(APIView):
             )
 
         try:
-            listing = client.get_products(limit=1000, offset=0, category_id=None)
+            listing = client.get_products(limit=1000, offset=0, category_id=str(category_id))
         except B2BClientError as exc:
             return _map_b2b_error(exc)
 
         pool = listing.get("items", []) if isinstance(listing, dict) else []
-        category_products = [
-            item
-            for item in pool
-            if str((item.get("category") or {}).get("id")) == str(category_id)
-        ]
-        if not category_products:
+        if not pool:
             return Response(
                 {"items": []},
                 status=status.HTTP_200_OK,
             )
 
         full_products = []
-        for short_item in category_products:
+        for short_item in pool:
             product_id = short_item.get("id")
             if not product_id:
                 continue
@@ -675,19 +659,14 @@ class CatalogFacetsView(APIView):
             )
 
         try:
-            listing = client.get_products(limit=1000, offset=0, category_id=None)
+            listing = client.get_products(limit=1000, offset=0, category_id=str(category_id))
         except B2BClientError as exc:
             return _map_b2b_error(exc)
 
         pool = listing.get("items", []) if isinstance(listing, dict) else []
-        category_products = [
-            item
-            for item in pool
-            if str((item.get("category") or {}).get("id")) == str(category_id)
-        ]
 
         full_products = []
-        for short_item in category_products:
+        for short_item in pool:
             product_id = short_item.get("id")
             if not product_id:
                 continue
