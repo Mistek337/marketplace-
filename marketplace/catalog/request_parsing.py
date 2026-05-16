@@ -18,6 +18,9 @@ _OPENAPI_TO_B2B_SORT = {
     "new": "created_desc",
 }
 
+MIN_SEARCH_LENGTH = 3
+MAX_SEARCH_LENGTH = 200
+
 
 def parse_catalog_list_params(request: Request):
     """
@@ -35,9 +38,14 @@ def parse_catalog_list_params(request: Request):
     limit = max(1, min(limit, 100))
     offset = max(0, offset)
 
-    search = (qp.get("q") or qp.get("search") or "").strip() or None
-    if search and len(search) > 200:
-        search = search[:200]
+    search = (qp.get("q") or "").strip() or None
+    if search is not None:
+        if len(search) < MIN_SEARCH_LENGTH:
+            return None, (
+                f"Search query must be at least {MIN_SEARCH_LENGTH} characters"
+            )
+        if len(search) > MAX_SEARCH_LENGTH:
+            search = search[:MAX_SEARCH_LENGTH]
 
     sort_raw = qp.get("sort") or "popularity"
     if sort_raw not in _OPENAPI_TO_B2B_SORT:
