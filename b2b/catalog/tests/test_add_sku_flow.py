@@ -4,9 +4,9 @@ from unittest.mock import patch
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
-from catalog.api_errors import FORBIDDEN, VALIDATION_ERROR
+from catalog.api_errors import FORBIDDEN
 from catalog.moderation_client import emit_product_created_event
-from catalog.models import Category, Product, SKU
+from catalog.models import Category, Product, SKU, SKUImage
 from sellers.models import Seller
 
 
@@ -56,6 +56,8 @@ class AddSKUFlowTests(TestCase):
         self.assertIn("id", data)
         self.assertEqual(data["product_id"], str(product.id))
         self.assertEqual(len(data["images"]), 1)
+        self.assertIn("id", data["images"][0])
+        self.assertEqual(data["images"][0]["url"], "https://example.com/sku.jpg")
 
         product.refresh_from_db()
         self.assertEqual(product.status, Product.Status.ON_MODERATION)
@@ -70,14 +72,18 @@ class AddSKUFlowTests(TestCase):
             seller_id=self.seller.id,
             status=Product.Status.ON_MODERATION,
         )
-        SKU.objects.create(
+        existing = SKU.objects.create(
             product=product,
             name="128GB",
             price=10_000_000,
             cost_price=8_000_000,
-            image="https://example.com/old.jpg",
             active_quantity=0,
             reserved_quantity=0,
+        )
+        SKUImage.objects.create(
+            sku=existing,
+            url="https://example.com/old.jpg",
+            ordering=0,
         )
 
         resp = self.client.post(self.url, self._payload(product_id=product.id), format="json")
@@ -107,7 +113,7 @@ class AddSKUFlowTests(TestCase):
         )
 
     def test_missing_image_returns_400(self):
-        """DoD-имя теста; HTTP 422 по unified OpenAPI ValidationError."""
+        """Имя из DoD; по OpenAPI пустой images[] допустим → 201."""
         product = Product.objects.create(
             title="Phone",
             description="d",
@@ -118,10 +124,8 @@ class AddSKUFlowTests(TestCase):
         payload = self._payload(product_id=product.id)
         payload["images"] = []
         resp = self.client.post(self.url, payload, format="json")
-        self.assertEqual(resp.status_code, 422)
-        data = resp.json()
-        self.assertEqual(data["code"], VALIDATION_ERROR)
-        self.assertIn("images", data.get("details", {}))
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(resp.json()["images"], [])
 
     @override_settings(
         MODERATION_BASE_URL="https://moderation.example",

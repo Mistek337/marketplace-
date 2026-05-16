@@ -12,7 +12,7 @@ from django.contrib.auth.hashers import make_password
 from django.core.management.base import BaseCommand
 from django.db import transaction
 
-from catalog.models import Category, Product, ProductCharacteristic, ProductImage, SKU
+from catalog.models import Category, Product, ProductCharacteristic, ProductImage, SKU, SKUImage
 from sellers.models import Seller
 
 # Стабильные маркеры — повторный запуск обновляет те же сущности.
@@ -72,25 +72,33 @@ class Command(BaseCommand):
         )
 
         product.skus.all().delete()
-        SKU.objects.create(
+        sku_128 = SKU.objects.create(
             product=product,
             name="128 GB, чёрный",
             price=8_999_000,
             cost_price=7_500_000,
             discount=0,
-            image="https://via.placeholder.com/200x200?text=128GB",
             active_quantity=25,
             reserved_quantity=0,
         )
-        SKU.objects.create(
+        SKUImage.objects.create(
+            sku=sku_128,
+            url="https://via.placeholder.com/200x200?text=128GB",
+            ordering=0,
+        )
+        sku_256 = SKU.objects.create(
             product=product,
             name="256 GB, белый",
             price=10_999_000,
             cost_price=9_300_000,
             discount=500_000,
-            image="https://via.placeholder.com/200x200?text=256GB",
             active_quantity=12,
             reserved_quantity=0,
+        )
+        SKUImage.objects.create(
+            sku=sku_256,
+            url="https://via.placeholder.com/200x200?text=256GB",
+            ordering=0,
         )
 
         verb = "Создан" if created else "Обновлён"

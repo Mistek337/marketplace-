@@ -8,7 +8,7 @@ from django.db.models import Exists, OuterRef, Q, Min
 
 from sellers.auth import SellerJWTAuthentication
 
-from .models import Category, Product, SKU
+from .models import Category, Product, SKU, SKUImage
 from .moderation_client import ModerationClientError, emit_product_created_event
 from .api_errors import (
     FORBIDDEN,
@@ -31,7 +31,6 @@ from .serializers import (
     ProductUpdateSerializer,
     SKUCreateSerializer,
     SKUResponseSerializer,
-    SKUSerializer,
     SKUUpdateSerializer,
 )
 
@@ -116,6 +115,7 @@ class ProductListCreateAPIView(generics.ListCreateAPIView):
         'image_rows',
         'characteristic_rows',
         'skus__characteristic_rows',
+        'skus__image_rows',
     )
 
     def get_permissions(self):
@@ -161,6 +161,7 @@ class ProductListCreateAPIView(generics.ListCreateAPIView):
             "image_rows",
             "characteristic_rows",
             "skus__characteristic_rows",
+            "skus__image_rows",
         )
 
         # Витрина B2C: по умолчанию только MODERATED + остаток. Для локальной отладки см. CATALOG_DEV_VISIBILITY.
@@ -246,6 +247,7 @@ class ProductRetrieveUpdateAPIView(generics.RetrieveUpdateAPIView):
         'image_rows',
         'characteristic_rows',
         'skus__characteristic_rows',
+        'skus__image_rows',
     )
     lookup_field = 'pk'
 
@@ -299,7 +301,10 @@ class SKUCreateAPIView(generics.CreateAPIView):
 
     authentication_classes = [SellerJWTAuthentication]
     permission_classes = [permissions.IsAuthenticated]
-    queryset = SKU.objects.select_related('product').prefetch_related('characteristic_rows')
+    queryset = SKU.objects.select_related('product').prefetch_related(
+        'characteristic_rows',
+        'image_rows',
+    )
     serializer_class = SKUCreateSerializer
 
     def create(self, request, *args, **kwargs):
@@ -331,17 +336,19 @@ class SKUCreateAPIView(generics.CreateAPIView):
 
                 had_skus = SKU.objects.filter(product=product).exists()
                 characteristics_data = data.get("characteristics", [])
+                images_data = data.get("images", [])
                 sku = SKU.objects.create(
                     product=product,
                     name=data["name"],
                     price=data["price"],
-                    cost_price=data["cost_price"],
+                    cost_price=data.get("cost_price"),
                     discount=data.get("discount", 0),
-                    image=data["image"],
-                    article=data.get("article", ""),
+                    article=data.get("article"),
                     active_quantity=0,
                     reserved_quantity=0,
                 )
+                for row in images_data:
+                    SKUImage.objects.create(sku=sku, **row)
                 for row in characteristics_data:
                     sku.characteristic_rows.create(**row)
 
@@ -365,13 +372,16 @@ class SKUCreateAPIView(generics.CreateAPIView):
 class SKURetrieveUpdateAPIView(generics.RetrieveUpdateAPIView):
     """GET / PUT /api/v1/skus/{id} — один SKU; обновление (частичный PUT)."""
 
-    queryset = SKU.objects.select_related('product').prefetch_related('characteristic_rows')
+    queryset = SKU.objects.select_related('product').prefetch_related(
+        'characteristic_rows',
+        'image_rows',
+    )
     lookup_field = 'pk'
 
     def get_serializer_class(self):
         if self.request.method == 'PUT':
             return SKUUpdateSerializer
-        return SKUSerializer
+        return SKUResponseSerializer
 
     def put(self, request, *args, **kwargs):
         kwargs['partial'] = True

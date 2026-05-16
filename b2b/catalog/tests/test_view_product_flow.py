@@ -1,7 +1,7 @@
 from django.test import TestCase
 from rest_framework.test import APIClient
 
-from catalog.models import Category, Product, ProductImage, SKU
+from catalog.models import Category, Product, ProductImage, SKU, SKUImage
 from sellers.models import Seller
 
 
@@ -34,15 +34,19 @@ class ViewProductFlowTests(TestCase):
             deleted=False,
         )
         ProductImage.objects.create(product=p, url="https://example.com/img.jpg", ordering=0)
-        SKU.objects.create(
+        sku = SKU.objects.create(
             product=p,
             name="256GB Black",
             price=12_999_000,
             cost_price=9_500_000,
             discount=0,
-            image="https://example.com/sku.jpg",
             active_quantity=10,
             reserved_quantity=2,
+        )
+        SKUImage.objects.create(
+            sku=sku,
+            url="https://example.com/sku.jpg",
+            ordering=0,
         )
         return p
 
