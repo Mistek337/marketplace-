@@ -92,10 +92,75 @@ class ProductImageSerializer(serializers.ModelSerializer):
         fields = ('id', 'url', 'ordering')
 
 
+class ProductImageCreateSerializer(serializers.Serializer):
+    url = serializers.CharField(max_length=2048)
+    ordering = serializers.IntegerField(default=0, required=False, min_value=0)
+
+
+class CharacteristicWriteSerializer(serializers.Serializer):
+    name = serializers.CharField(max_length=255)
+    value = serializers.CharField(max_length=1024)
+
+
 class SKUCharacteristicSerializer(serializers.ModelSerializer):
     class Meta:
         model = SKUCharacteristic
         fields = ('name', 'value')
+
+
+class SKUCharacteristicResponseSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SKUCharacteristic
+        fields = ('id', 'name', 'value')
+
+
+class SKUImageResponseSerializer(serializers.Serializer):
+    id = serializers.UUIDField()
+    url = serializers.CharField()
+    ordering = serializers.IntegerField()
+
+
+class SKUResponseSerializer(serializers.ModelSerializer):
+    """Seller-view SKU (OpenAPI SKUResponse)."""
+
+    product_id = serializers.UUIDField(read_only=True)
+    stock_quantity = serializers.IntegerField(read_only=True)
+    images = serializers.SerializerMethodField()
+    characteristics = SKUCharacteristicResponseSerializer(
+        source='characteristic_rows',
+        many=True,
+        read_only=True,
+    )
+
+    class Meta:
+        model = SKU
+        fields = (
+            'id',
+            'product_id',
+            'name',
+            'price',
+            'discount',
+            'cost_price',
+            'stock_quantity',
+            'active_quantity',
+            'reserved_quantity',
+            'article',
+            'images',
+            'characteristics',
+            'created_at',
+            'updated_at',
+        )
+
+    def get_images(self, obj: SKU) -> list[dict]:
+        if not obj.image:
+            return []
+        return [
+            {
+                'id': str(obj.id),
+                'url': obj.image,
+                'ordering': 0,
+            }
+        ]
 
 
 class SKUSerializer(serializers.ModelSerializer):
@@ -191,43 +256,37 @@ class ProductDetailSerializer(serializers.ModelSerializer):
         ]
 
 
-class ProductCreateSKUSerializer(serializers.ModelSerializer):
-    """Формат SKU в ответе POST /products (OpenAPI)."""
+class ProductResponseSerializer(serializers.ModelSerializer):
+    """OpenAPI ProductResponse — ответ POST/GET seller-view."""
 
-    stock_quantity = serializers.IntegerField(source="active_quantity", read_only=True)
-
-    class Meta:
-        model = SKU
-        fields = ("id", "name", "price", "stock_quantity", "article")
-
-
-class ProductCreateResponseSerializer(serializers.ModelSerializer):
-    """Ответ 201 после POST /api/v1/products — как в OpenAPI/Swagger."""
-
-    images = ProductImageSerializer(source="image_rows", many=True, read_only=True)
+    category_id = serializers.UUIDField(read_only=True)
+    blocking_reason_id = serializers.UUIDField(read_only=True, allow_null=True)
+    images = ProductImageSerializer(source='image_rows', many=True, read_only=True)
     characteristics = ProductCharacteristicSerializer(
-        source="characteristic_rows",
+        source='characteristic_rows',
         many=True,
         read_only=True,
     )
-    skus = ProductCreateSKUSerializer(many=True, read_only=True)
-    created_at = serializers.DateTimeField(read_only=True)
-    updated_at = serializers.DateTimeField(read_only=True)
+    skus = SKUResponseSerializer(many=True, read_only=True)
 
     class Meta:
         model = Product
         fields = (
-            "id",
-            "seller_id",
-            "category_id",
-            "title",
-            "description",
-            "status",
-            "images",
-            "characteristics",
-            "skus",
-            "created_at",
-            "updated_at",
+            'id',
+            'seller_id',
+            'category_id',
+            'title',
+            'slug',
+            'description',
+            'status',
+            'deleted',
+            'blocking_reason_id',
+            'moderator_comment',
+            'images',
+            'characteristics',
+            'skus',
+            'created_at',
+            'updated_at',
         )
 
 
@@ -297,49 +356,46 @@ class SKUCreateSerializer(serializers.ModelSerializer):
         return SKUSerializer(instance, context=self.context).data
 
 
-class ProductCreateSerializer(serializers.ModelSerializer):
+class ProductCreateSerializer(serializers.Serializer):
     """
-    POST /api/v1/products — только карточка товара (без SKU).
-    Статус всегда CREATED; seller_id только из JWT.
+    POST /api/v1/products — OpenAPI ProductCreate.
+    Статус CREATED, seller_id из JWT, без SKU.
     """
 
     title = serializers.CharField(required=True, allow_blank=False, max_length=255)
     description = serializers.CharField(required=True, allow_blank=False, max_length=5000)
     category_id = serializers.UUIDField(
         error_messages={
-            "invalid": "category_id must be a valid UUID",
-            "required": "This field is required.",
+            'invalid': 'category_id must be a valid UUID',
+            'required': "Поле 'category_id' обязательно",
         },
     )
-    images = ProductImageSerializer(many=True, required=True)
-    characteristics = ProductCharacteristicSerializer(many=True, required=False)
-
-    class Meta:
-        model = Product
-        fields = ('title', 'description', 'category_id', 'images', 'characteristics')
+    slug = serializers.SlugField(required=False, allow_blank=True, max_length=255)
+    images = ProductImageCreateSerializer(many=True, required=False, default=list)
+    characteristics = CharacteristicWriteSerializer(many=True, required=False, default=list)
 
     def validate_category_id(self, value):
         if not Category.objects.filter(pk=value).exists():
-            raise serializers.ValidationError("Category not found")
-        return value
-
-    def validate_images(self, value):
-        if not value:
-            raise serializers.ValidationError("At least one image is required")
+            raise serializers.ValidationError('Category not found')
         return value
 
     def create(self, validated_data: dict) -> Product:
-        category = Category.objects.get(pk=validated_data.pop("category_id"))
+        category = Category.objects.get(pk=validated_data.pop('category_id'))
+        slug = (validated_data.pop('slug', None) or '').strip()
         images_data = validated_data.pop('images', [])
         characteristics_data = validated_data.pop('characteristics', [])
         request = self.context.get('request')
 
         product = Product.objects.create(
-            **validated_data,
+            title=validated_data['title'],
+            description=validated_data['description'],
+            slug=slug,
             category=category,
-            seller_id=getattr(getattr(request, "user", None), "id", None),
+            seller_id=getattr(getattr(request, 'user', None), 'id', None),
             status=Product.Status.CREATED,
         )
+        product.ensure_slug()
+        product.save(update_fields=['slug'])
 
         for row in images_data:
             ProductImage.objects.create(product=product, **row)
@@ -349,7 +405,7 @@ class ProductCreateSerializer(serializers.ModelSerializer):
         return product
 
     def to_representation(self, instance: Product) -> dict:
-        return ProductCreateResponseSerializer(instance, context=self.context).data
+        return ProductResponseSerializer(instance, context=self.context).data
 
 
 class ProductUpdateSerializer(serializers.ModelSerializer):
