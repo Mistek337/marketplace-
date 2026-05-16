@@ -98,7 +98,7 @@
     }
 
     function skuQty(sku) {
-        const q = sku.active_quantity ?? sku.activeQuantity;
+        const q = sku.available_quantity ?? sku.active_quantity ?? sku.activeQuantity;
         return Number(q || 0);
     }
 
@@ -118,7 +118,11 @@
             seen.add(u);
             urls.push(u);
         };
-        if (sku && sku.image) push(sku.image);
+        if (sku && sku.images && sku.images.length) {
+            sku.images.forEach((img) => push(img.url));
+        } else if (sku && sku.image) {
+            push(sku.image);
+        }
         (product.images || []).forEach((img) => push(img.url));
         if (!urls.length && imagePlaceholder) push(imagePlaceholder);
         if (!urls.length) push("");
@@ -130,7 +134,7 @@
         galleryIndex = 0;
         const u = galleryUrls[galleryIndex];
         galleryMain.src = u || "";
-        galleryMain.alt = product.title || "";
+        galleryMain.alt = product.name || product.title || "";
         galleryThumbs.innerHTML = "";
         galleryUrls.forEach((url, i) => {
             const b = document.createElement("button");
@@ -162,14 +166,14 @@
             return;
         }
         const price = Number(sku.price || 0);
-        const discount = Number(sku.discount || 0);
-        if (discount > 0) {
+        const oldPrice = sku.old_price != null ? Number(sku.old_price) : null;
+        if (oldPrice != null && oldPrice > price) {
             skuPrice.innerHTML =
                 '<span class="text-decoration-line-through text-muted me-2">' +
-                formatRub(price) +
+                formatRub(oldPrice) +
                 "</span>" +
                 '<span class="text-primary">' +
-                formatRub(price - discount) +
+                formatRub(price) +
                 "</span>";
         } else {
             skuPrice.innerHTML = '<span class="text-primary">' + formatRub(price) + "</span>";
@@ -214,20 +218,26 @@
         updateCartButton(sku);
     }
 
-    function renderCharacteristics(rows) {
-        if (!rows || !rows.length) {
+    function renderCharacteristics(attrs) {
+        const rows = [];
+        if (Array.isArray(attrs)) {
+            attrs.forEach((row) => rows.push([row.name, row.value]));
+        } else if (attrs && typeof attrs === "object") {
+            Object.keys(attrs).forEach((key) => rows.push([key, attrs[key]]));
+        }
+        if (!rows.length) {
             productChars.innerHTML = "";
             return;
         }
         const table = document.createElement("table");
         table.className = "table table-sm table-bordered mb-0";
-        rows.forEach((row) => {
+        rows.forEach(([name, value]) => {
             const tr = document.createElement("tr");
             tr.innerHTML =
                 "<th class=\"w-25 text-muted small\">" +
-                (row.name || "") +
+                (name || "") +
                 "</th><td class=\"small\">" +
-                (row.value ?? "") +
+                (value ?? "") +
                 "</td>";
             table.appendChild(tr);
         });
@@ -249,9 +259,14 @@
             btn.type = "button";
             btn.className = "btn btn-sm btn-outline-secondary";
             btn.dataset.skuId = String(sku.id);
-            const parts = (sku.characteristics || [])
-                .map((c) => (c.name && c.value ? c.name + ": " + c.value : null))
-                .filter(Boolean);
+            const parts = [];
+            const attrs = sku.attributes || {};
+            Object.keys(attrs).forEach((key) => {
+                if (key && attrs[key] != null) parts.push(key + ": " + attrs[key]);
+            });
+            (sku.characteristics || []).forEach((c) => {
+                if (c.name && c.value) parts.push(c.name + ": " + c.value);
+            });
             btn.textContent = parts.length ? parts.join(" · ") : (sku.name || "SKU");
             btn.addEventListener("click", () => selectSku(sku, true));
             skuList.appendChild(btn);
@@ -268,10 +283,12 @@
 
     async function loadSimilar() {
         try {
-            const r = await fetch("/api/v1/products/" + productId + "/similar?limit=8");
+            const r = await fetch(
+                "/api/v1/catalog/products/" + productId + "/similar?limit=8"
+            );
             if (!r.ok) return;
-            const data = await r.json();
-            const items = Array.isArray(data.items) ? data.items : [];
+            const items = await r.json();
+            if (!Array.isArray(items)) return;
             if (!items.length) return;
             similarSection.classList.remove("d-none");
             similarGrid.innerHTML = "";
@@ -280,17 +297,21 @@
                 col.className = "col";
                 const card = document.createElement("div");
                 card.className = "card h-100 position-relative";
-                const img = it.image
-                    ? '<img src="' + it.image + '" class="card-img-top" alt="" style="height:120px;object-fit:cover;">'
+                const imgUrl =
+                    it.images && it.images[0] && it.images[0].url ? it.images[0].url : "";
+                const img = imgUrl
+                    ? '<img src="' + imgUrl + '" class="card-img-top" alt="" style="height:120px;object-fit:cover;">'
                     : '<div class="bg-light text-center py-4 text-muted small">Нет фото</div>';
-                const stock = it.in_stock ? "" : '<div class="text-warning small">Нет в наличии</div>';
+                const stock = it.has_stock
+                    ? ""
+                    : '<div class="text-warning small">Нет в наличии</div>';
                 card.innerHTML =
                     img +
                     '<div class="card-body p-2">' +
                     '<a class="stretched-link text-decoration-none text-dark small fw-semibold" href="/products/' +
                     it.id +
                     '">' +
-                    (it.title || "Товар") +
+                    (it.name || "Товар") +
                     "</a>" +
                     stock +
                     "</div>";
@@ -309,7 +330,7 @@
 
         let response;
         try {
-            response = await fetch("/api/v1/products/" + productId);
+            response = await fetch("/api/v1/catalog/products/" + productId);
         } catch (e) {
             showError("<p>Не удалось загрузить товар, попробуйте позже.</p>", true);
             return;
@@ -338,11 +359,12 @@
 
         product = data;
         skus = Array.isArray(data.skus) ? data.skus : [];
-        document.title = (data.title || "Товар") + " — Marketplace";
-        breadcrumbTitle.textContent = data.title || "Товар";
-        productTitle.textContent = data.title || "";
+        const displayName = data.name || data.title || "Товар";
+        document.title = displayName + " — Marketplace";
+        breadcrumbTitle.textContent = displayName;
+        productTitle.textContent = displayName;
         productDescription.textContent = data.description || "";
-        renderCharacteristics(data.characteristics);
+        renderCharacteristics(data.attributes || data.characteristics);
         renderSkus();
         const sku = pickSkuFromUrl(skus);
         if (sku) {

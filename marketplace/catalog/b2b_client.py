@@ -29,9 +29,17 @@ class B2BClient:
         url = f"{self.base_url}{path}"
         if not query:
             return url
-        query_string = parse.urlencode(
-            {k: v for k, v in query.items() if v is not None and v != ""}
-        )
+        pairs = []
+        for key, value in query.items():
+            if value is None or value == "":
+                continue
+            if isinstance(value, (list, tuple)):
+                for item in value:
+                    if item is not None and item != "":
+                        pairs.append((key, item))
+            else:
+                pairs.append((key, value))
+        query_string = parse.urlencode(pairs)
         return f"{url}?{query_string}" if query_string else url
 
     def _single_get(self, path, query=None):
@@ -72,18 +80,38 @@ class B2BClient:
             except B2BClientError:
                 raise first
 
-    def get_products(self, *, limit, offset, category_id=None, filters=None, sort=None, search=None, ids=None):
-        data = self._get(
-            self._api_path("public", "products"),
-            query={
-                "limit": limit,
-                "offset": offset,
-                "category_id": category_id,
-                "filters": filters,
-                "sort": sort,
-                "search": search,
-            },
-        )
+    def get_products(
+        self,
+        *,
+        limit,
+        offset,
+        category_id=None,
+        seller_id=None,
+        min_price=None,
+        max_price=None,
+        char_filters=None,
+        filters=None,
+        sort=None,
+        search=None,
+        ids=None,
+    ):
+        query = {
+            "limit": limit,
+            "offset": offset,
+            "category_id": category_id,
+            "seller_id": seller_id,
+            "min_price": min_price,
+            "max_price": max_price,
+            "sort": sort,
+            "search": search,
+        }
+        if filters:
+            query["filters"] = filters
+        for name, values in (char_filters or {}).items():
+            key = f"filters[{name}]"
+            query[key] = list(values) if isinstance(values, (list, tuple)) else [values]
+
+        data = self._get(self._api_path("public", "products"), query=query)
         if isinstance(data, dict) and "items" in data:
             return data
         if isinstance(data, list):
