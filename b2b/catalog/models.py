@@ -18,6 +18,7 @@ class Category(models.Model):
         on_delete=models.CASCADE,
         related_name='children',
     )
+    is_active = models.BooleanField(default=True)
 
     class Meta:
         verbose_name_plural = 'categories'
@@ -160,3 +161,19 @@ class SKUCharacteristic(models.Model):
 
     class Meta:
         ordering = ['id']
+
+
+class ModerationOutboxEvent(models.Model):
+    """Outbox для исходящих событий в Moderation (OpenAPI: idempotency_key)."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    idempotency_key = models.UUIDField(unique=True, db_index=True)
+    event = models.CharField(max_length=32)
+    product_id = models.UUIDField(db_index=True)
+    seller_id = models.UUIDField(null=True, blank=True)
+    payload = models.JSONField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    sent_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['created_at']
