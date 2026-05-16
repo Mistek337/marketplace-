@@ -69,17 +69,17 @@ class FavoritesListView(APIView):
         if not rows:
             return Response({"items": [], "total": total, "limit": limit, "offset": offset})
 
-        ids = ",".join(str(r.product_id) for r in rows)
+        ids = [str(r.product_id) for r in rows]
         client = B2BClient()
         try:
-            data = client.get_products(limit=len(rows), offset=0, ids=ids)
+            pool = client.batch_public_products(ids)
         except B2BClientError:
             return Response(
                 {"code": "B2B_UNAVAILABLE", "message": "Catalog service unavailable"},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
-
-        pool = data.get("items", []) if isinstance(data, dict) else []
+        if not isinstance(pool, list):
+            pool = []
         items = [_to_favorite_item(p) for p in pool if isinstance(p, dict) and p.get("id")]
         return Response({"items": items, "total": total, "limit": limit, "offset": offset})
 
