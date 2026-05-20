@@ -1,5 +1,7 @@
 """Catalog API — эндпоинты OpenAPI (тег Catalog)."""
 
+import logging
+
 from django.conf import settings
 from rest_framework import permissions, status
 from rest_framework.response import Response
@@ -14,6 +16,8 @@ from .openapi_catalog import (
 )
 from .request_parsing import parse_catalog_list_params, parse_similar_limit_param
 from .api_errors import map_b2b_error
+
+logger = logging.getLogger(__name__)
 
 
 def _validation_error(message: str, *, status_code=status.HTTP_400_BAD_REQUEST):
@@ -119,7 +123,13 @@ class CatalogProductSimilarView(APIView):
         client = B2BClient()
         try:
             pool = client.get_similar_products(product_id, limit=limit)
-        except B2BClientError:
+        except B2BClientError as exc:
+            logger.warning(
+                "B2B similar products unavailable for %s: %s",
+                product_id,
+                exc,
+                exc_info=True,
+            )
             pool = []
 
         if not isinstance(pool, list):

@@ -6,13 +6,13 @@ import re
 from uuid import UUID
 
 from django.conf import settings
-from django.db.models import Exists, Min, OuterRef, Prefetch, Q, QuerySet
+from django.db.models import Case, Exists, IntegerField, Min, OuterRef, Prefetch, Q, QuerySet, When
 from rest_framework import status
 from rest_framework.request import Request
 from rest_framework.response import Response
 
 from .api_errors import UNAUTHORIZED, drf_validation_error, error_body
-from .models import Product, ProductCharacteristic, ProductImage, SKU
+from .models import Category, Product, ProductCharacteristic, ProductImage, SKU
 
 _FILTER_KEY_RE = re.compile(r"^filters\[(.+)\]$")
 PUBLIC_SORT_VALUES = frozenset({"price_asc", "price_desc", "created_desc", "popular"})
@@ -207,16 +207,56 @@ def parse_similar_limit(request: Request) -> int | Response:
 
 
 def public_similar_queryset(*, product_id, limit: int) -> QuerySet[Product] | None:
-    anchor = public_visible_queryset(with_stock_filter=True).filter(id=product_id).first()
+    """
+    Похожие товары: та же категория, затем sibling-категории (общий parent_id).
+    Canon B2C-4: если в своей категории мало — добираем из соседних под тем же родителем.
+    """
+    anchor = (
+        public_visible_queryset(with_stock_filter=True)
+        .select_related("category")
+        .filter(id=product_id)
+        .first()
+    )
     if anchor is None:
         return None
-    return (
-        public_visible_queryset(with_stock_filter=True)
-        .filter(category_id=anchor.category_id)
-        .exclude(id=product_id)
-        .annotate(min_price=Min("skus__price"))
-        .order_by("?")[:limit]
+
+    base = public_visible_queryset(with_stock_filter=True).annotate(
+        min_price=Min("skus__price")
     )
+    ordered_ids: list = []
+
+    same_category_ids = list(
+        base.filter(category_id=anchor.category_id)
+        .exclude(id=product_id)
+        .order_by("?")
+        .values_list("id", flat=True)[:limit]
+    )
+    ordered_ids.extend(same_category_ids)
+
+    remaining = limit - len(ordered_ids)
+    parent_id = anchor.category.parent_id if anchor.category_id else None
+    if remaining > 0 and parent_id is not None:
+        sibling_category_ids = Category.objects.filter(parent_id=parent_id).exclude(
+            id=anchor.category_id
+        )
+        if sibling_category_ids.exists():
+            sibling_ids = list(
+                base.filter(category_id__in=sibling_category_ids)
+                .exclude(id=product_id)
+                .exclude(id__in=ordered_ids)
+                .order_by("?")
+                .values_list("id", flat=True)[:remaining]
+            )
+            ordered_ids.extend(sibling_ids)
+
+    if not ordered_ids:
+        return base.none()
+
+    order = Case(
+        *[When(pk=pk, then=position) for position, pk in enumerate(ordered_ids)],
+        output_field=IntegerField(),
+    )
+    return base.filter(id__in=ordered_ids).order_by(order)
 
 
 def public_visible_sku_queryset() -> QuerySet[SKU]:
