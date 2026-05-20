@@ -97,6 +97,7 @@ REST_FRAMEWORK = {
     'DEFAULT_RENDERER_CLASSES': [
         'rest_framework.renderers.JSONRenderer',
     ],
+    'EXCEPTION_HANDLER': 'b2b.api_exceptions.b2b_exception_handler',
 }
 
 B2C_TO_B2B_KEY = os.environ.get("B2C_TO_B2B_KEY", "dev-b2c-key")

@@ -39,10 +39,31 @@ class CreateProductFlowTests(TestCase):
         if field is not None:
             self.assertIn(field, data["details"])
 
+    def _assert_product_response_shape(self, data):
+        for key in (
+            "id",
+            "seller_id",
+            "category_id",
+            "title",
+            "slug",
+            "description",
+            "status",
+            "deleted",
+            "blocking_reason_id",
+            "moderator_comment",
+            "images",
+            "characteristics",
+            "skus",
+            "created_at",
+            "updated_at",
+        ):
+            self.assertIn(key, data, msg=f"missing ProductResponse field: {key}")
+
     def test_create_product_returns_201_with_created_status(self):
         resp = self.client.post(self.url, data=self._payload(), format="json")
         self.assertEqual(resp.status_code, 201)
         data = resp.json()
+        self._assert_product_response_shape(data)
         self.assertEqual(data["status"], Product.Status.CREATED)
         self.assertEqual(data["seller_id"], str(self.seller.id))
         self.assertEqual(data["category_id"], str(self.category.id))
@@ -66,12 +87,35 @@ class CreateProductFlowTests(TestCase):
         product = Product.objects.get(title="iPhone 15")
         self.assertEqual(str(product.seller_id), str(self.seller.id))
 
-    def test_missing_images_returns_201_with_empty_images(self):
+    def test_missing_images_returns_422(self):
         payload = self._payload()
         payload.pop("images")
         resp = self.client.post(self.url, data=payload, format="json")
-        self.assertEqual(resp.status_code, 201)
-        self.assertEqual(resp.json()["images"], [])
+        self._assert_validation_error(resp, field="images")
+
+    def test_empty_images_returns_422(self):
+        payload = self._payload()
+        payload["images"] = []
+        resp = self.client.post(self.url, data=payload, format="json")
+        self._assert_validation_error(resp, field="images")
+
+    def test_post_products_without_auth_returns_unauthorized_shape(self):
+        self.client.force_authenticate(user=None)
+        resp = self.client.post(self.url, data=self._payload(), format="json")
+        self.assertEqual(resp.status_code, 401)
+        self.assertEqual(
+            resp.json(),
+            {"code": "UNAUTHORIZED", "message": "Authentication required"},
+        )
+
+    def test_post_products_invalid_token_returns_unauthorized_shape(self):
+        self.client.force_authenticate(user=None)
+        self.client.credentials(HTTP_AUTHORIZATION="Bearer not-a-jwt")
+        resp = self.client.post(self.url, data=self._payload(), format="json")
+        self.assertEqual(resp.status_code, 401)
+        data = resp.json()
+        self.assertEqual(data["code"], "UNAUTHORIZED")
+        self.assertEqual(data["message"], "Invalid token")
 
     def test_missing_category_returns_422(self):
         payload = self._payload()
