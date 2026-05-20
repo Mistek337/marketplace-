@@ -8,6 +8,8 @@ from rest_framework import permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from catalog.api_errors import UNAUTHORIZED, error_body
+
 from .auth import SellerJWTAuthentication
 from .models import RevokedRefreshToken, Seller
 from .serializers import (
@@ -54,13 +56,13 @@ class SellerLoginView(APIView):
             seller = Seller.objects.get(email=username)
         except Seller.DoesNotExist:
             return Response(
-                {"detail": "Invalid credentials"},
+                error_body(code=UNAUTHORIZED, message="Invalid credentials"),
                 status=status.HTTP_401_UNAUTHORIZED,
             )
 
         if not check_password(password, seller.password):
             return Response(
-                {"detail": "Invalid credentials"},
+                error_body(code=UNAUTHORIZED, message="Invalid credentials"),
                 status=status.HTTP_401_UNAUTHORIZED,
             )
 
@@ -94,13 +96,13 @@ class SellerRefreshView(APIView):
             )
         except jwt.PyJWTError:
             return Response(
-                {"detail": "Invalid refresh token"},
+                error_body(code=UNAUTHORIZED, message="Invalid refresh token"),
                 status=status.HTTP_401_UNAUTHORIZED,
             )
 
         if payload.get("token_type") != "refresh":
             return Response(
-                {"detail": "Invalid refresh token"},
+                error_body(code=UNAUTHORIZED, message="Invalid refresh token"),
                 status=status.HTTP_401_UNAUTHORIZED,
             )
 
@@ -108,7 +110,7 @@ class SellerRefreshView(APIView):
         jti = payload.get("jti")
         if not seller_id or not jti:
             return Response(
-                {"detail": "Invalid refresh token"},
+                error_body(code=UNAUTHORIZED, message="Invalid refresh token"),
                 status=status.HTTP_401_UNAUTHORIZED,
             )
 
@@ -116,7 +118,7 @@ class SellerRefreshView(APIView):
             token_jti = UUID(str(jti))
         except ValueError:
             return Response(
-                {"detail": "Invalid refresh token"},
+                error_body(code=UNAUTHORIZED, message="Invalid refresh token"),
                 status=status.HTTP_401_UNAUTHORIZED,
             )
 
@@ -124,13 +126,13 @@ class SellerRefreshView(APIView):
             seller = Seller.objects.get(id=seller_id)
         except Seller.DoesNotExist:
             return Response(
-                {"detail": "Invalid refresh token"},
+                error_body(code=UNAUTHORIZED, message="Invalid refresh token"),
                 status=status.HTTP_401_UNAUTHORIZED,
             )
 
         if RevokedRefreshToken.objects.filter(jti=token_jti).exists():
             return Response(
-                {"detail": "Invalid refresh token"},
+                error_body(code=UNAUTHORIZED, message="Invalid refresh token"),
                 status=status.HTTP_401_UNAUTHORIZED,
             )
 

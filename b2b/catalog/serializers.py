@@ -397,8 +397,13 @@ class ProductCreateSerializer(serializers.Serializer):
         },
     )
     slug = serializers.SlugField(required=False, allow_blank=True, max_length=255)
-    images = ProductImageCreateSerializer(many=True, required=False, default=list)
+    images = ProductImageCreateSerializer(many=True, required=True)
     characteristics = CharacteristicWriteSerializer(many=True, required=False, default=list)
+
+    def validate_images(self, value):
+        if not value:
+            raise serializers.ValidationError("At least one image is required")
+        return value
 
     def validate_category_id(self, value):
         if not Category.objects.filter(pk=value).exists():
