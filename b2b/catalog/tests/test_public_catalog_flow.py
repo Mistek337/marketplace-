@@ -168,6 +168,70 @@ class PublicCatalogFlowTests(TestCase):
         self.assertNotIn(str(anchor.id), ids)
         self.assertIn("min_price", data[0])
 
+    def test_public_similar_fills_from_sibling_categories_when_few_in_anchor_category(self):
+        parent = Category.objects.create(name="Electronics")
+        anchor_category = Category.objects.create(name="Phones", parent=parent)
+        sibling_category = Category.objects.create(name="Tablets", parent=parent)
+
+        anchor = Product.objects.create(
+            title="Anchor phone",
+            description="Desc",
+            category=anchor_category,
+            status=Product.Status.MODERATED,
+            seller_id=self.seller_id,
+            slug="anchor-phone",
+        )
+        SKU.objects.create(
+            product=anchor,
+            name="Default",
+            price=10_000,
+            active_quantity=2,
+        )
+        peer = Product.objects.create(
+            title="Peer phone",
+            description="Desc",
+            category=anchor_category,
+            status=Product.Status.MODERATED,
+            seller_id=self.seller_id,
+            slug="peer-phone",
+        )
+        SKU.objects.create(
+            product=peer,
+            name="Default",
+            price=11_000,
+            active_quantity=2,
+        )
+
+        sibling_products = []
+        for index in range(5):
+            product = Product.objects.create(
+                title=f"Tablet {index}",
+                description="Desc",
+                category=sibling_category,
+                status=Product.Status.MODERATED,
+                seller_id=self.seller_id,
+                slug=f"tablet-{index}",
+            )
+            SKU.objects.create(
+                product=product,
+                name="Default",
+                price=15_000 + index,
+                active_quantity=3,
+            )
+            sibling_products.append(product)
+
+        url = f"/api/v1/public/products/{anchor.id}/similar/"
+        resp = self.client.get(url, {"limit": 8}, **self._headers())
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(len(data), 6)
+
+        returned_ids = {row["id"] for row in data}
+        self.assertIn(str(peer.id), returned_ids)
+        self.assertNotIn(str(anchor.id), returned_ids)
+        sibling_ids = {str(product.id) for product in sibling_products}
+        self.assertTrue(returned_ids & sibling_ids)
+
     def test_public_similar_missing_product_returns_404(self):
         missing = "00000000-0000-4000-8000-000000000099"
         url = f"/api/v1/public/products/{missing}/similar/"
