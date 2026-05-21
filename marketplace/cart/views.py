@@ -10,6 +10,7 @@ from .request_utils import reject_client_identity_override
 from .services import (
     CartItemNotFoundError,
     InsufficientStockError,
+    InvalidSessionHeaderError,
     MissingSessionError,
     SkuUnavailableError,
     add_or_increment_item,
@@ -176,10 +177,11 @@ class CartMergeAPIView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
-        # OpenAPI: 200, 401 (401 — через IsAuthenticated / exception handler)
-        session_id = parse_session_header(request, strict=False)
+        try:
+            session_id = parse_session_header(request, strict=True)
+        except InvalidSessionHeaderError:
+            return _bad_request("Invalid X-Session-Id header")
         if session_id is None:
-            cart = resolve_cart(request, create_guest_session=False)
-        else:
-            cart = merge_guest_into_user(guest_session_id=session_id, user=request.user)
+            return _bad_request("X-Session-Id header is required")
+        cart = merge_guest_into_user(guest_session_id=session_id, user=request.user)
         return Response(build_cart_response(cart), status=status.HTTP_200_OK)

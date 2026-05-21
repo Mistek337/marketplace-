@@ -240,9 +240,35 @@ def validate_cart(cart: Cart) -> dict:
     }
 
 
+def _unavailable_reason(
+    *,
+    product: dict | None,
+    sku_data: dict | None,
+    status: str,
+    available_quantity: int,
+    quantity: int,
+) -> str:
+    if product is None:
+        return "PRODUCT_DELETED"
+    if bool(product.get("deleted")):
+        return "PRODUCT_DELETED"
+    status_value = (status or "").upper()
+    if status_value != "MODERATED":
+        return "PRODUCT_BLOCKED" if "BLOCKED" in status_value else "PRODUCT_DELETED"
+    if sku_data is None:
+        return "PRODUCT_DELETED"
+    if available_quantity == 0:
+        return "OUT_OF_STOCK"
+    if quantity > available_quantity:
+        return "QUANTITY_REDUCED"
+    return "OUT_OF_STOCK"
+
+
 def _assemble_cart_response(cart: Cart, items_payload: list[dict]) -> dict:
     items_count = sum(int(i["quantity"]) for i in items_payload)
-    subtotal = sum(int(i["line_total"]) for i in items_payload)
+    subtotal = sum(
+        int(i["line_total"]) for i in items_payload if i.get("is_available")
+    )
     is_valid = all(i["is_available"] for i in items_payload) if items_payload else True
     cart_public_id = str(cart.session_id) if cart.session_id else str(cart.id)
     return {
@@ -365,7 +391,6 @@ def _enrich_line(row: CartItem, product: dict | None) -> dict:
         image = None
 
     name = f"{product_title} — {sku_name}".strip(" —") if product_title else sku_name
-    line_total = unit_price * row.quantity
     is_available = (
         product is not None
         and not bool(product.get("deleted"))
@@ -374,6 +399,7 @@ def _enrich_line(row: CartItem, product: dict | None) -> dict:
         and available_quantity > 0
         and row.quantity <= available_quantity
     )
+    line_total = unit_price * row.quantity if is_available else 0
 
     payload = {
         "sku_id": str(row.sku_id),
@@ -387,6 +413,14 @@ def _enrich_line(row: CartItem, product: dict | None) -> dict:
         "available_quantity": available_quantity,
         "is_available": is_available,
     }
+    if not is_available:
+        payload["unavailable_reason"] = _unavailable_reason(
+            product=product,
+            sku_data=sku_data,
+            status=status,
+            available_quantity=available_quantity,
+            quantity=row.quantity,
+        )
     if image is not None:
         payload["image"] = image
     return payload

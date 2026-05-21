@@ -132,9 +132,13 @@ def test_unavailable_sku_shown_with_reason(client, monkeypatch):
 
     r = client.get("/api/v1/cart")
     assert r.status_code == 200
-    item = r.json()["items"][0]
+    data = r.json()
+    item = data["items"][0]
     assert item["is_available"] is False
-    assert r.json()["is_valid"] is False
+    assert item["unavailable_reason"] == "OUT_OF_STOCK"
+    assert item["line_total"] == 0
+    assert data["subtotal"] == 0
+    assert data["is_valid"] is False
 
 
 @pytest.mark.django_db
@@ -187,6 +191,80 @@ def test_guest_cart_merged_on_login(client, monkeypatch):
     merged_item = CartItem.objects.get(cart__user=user, sku_id=sku_id)
     assert merged_item.quantity == 3
     assert not Cart.objects.filter(session_id=guest_session).exists()
+
+
+@pytest.mark.django_db
+def test_subtotal_excludes_unavailable_lines(client, monkeypatch):
+    product_ok = uuid.uuid4()
+    sku_ok = uuid.uuid4()
+    product_bad = uuid.uuid4()
+    sku_bad = uuid.uuid4()
+
+    products = {
+        str(product_ok): _product_payload(product_id=product_ok, sku_id=sku_ok, price=1000),
+        str(product_bad): _product_payload(
+            product_id=product_bad, sku_id=sku_bad, price=5000, active_quantity=0
+        ),
+    }
+
+    class FakeB2BClient:
+        def get_public_sku(self, sku_id_arg):
+            for product in products.values():
+                for sku in product["skus"]:
+                    if str(sku["id"]) == str(sku_id_arg):
+                        return {
+                            "id": str(sku["id"]),
+                            "product_id": str(product["id"]),
+                            "price": sku["price"],
+                            "active_quantity": sku["active_quantity"],
+                        }
+            raise AssertionError("unknown sku")
+
+        def get_product(self, product_id_arg):
+            return products[str(product_id_arg)]
+
+        def batch_public_products(self, product_ids):
+            return [products[str(pid)] for pid in product_ids if str(pid) in products]
+
+    monkeypatch.setattr("cart.services.B2BClient", FakeB2BClient)
+
+    session_id = uuid.uuid4()
+    cart = Cart.objects.create(session_id=session_id, user=None)
+    CartItem.objects.create(
+        cart=cart, sku_id=sku_ok, product_id=product_ok, quantity=2, unit_price_at_add=1000
+    )
+    CartItem.objects.create(
+        cart=cart, sku_id=sku_bad, product_id=product_bad, quantity=1, unit_price_at_add=5000
+    )
+
+    client.defaults["HTTP_X_SESSION_ID"] = str(session_id)
+    data = client.get("/api/v1/cart").json()
+    by_sku = {item["sku_id"]: item for item in data["items"]}
+
+    assert by_sku[str(sku_ok)]["line_total"] == 2000
+    assert by_sku[str(sku_bad)]["line_total"] == 0
+    assert by_sku[str(sku_bad)]["unavailable_reason"] == "OUT_OF_STOCK"
+    assert data["subtotal"] == 2000
+
+
+@pytest.mark.django_db
+def test_merge_requires_session_header(client, monkeypatch):
+    product_id = uuid.uuid4()
+    sku_id = uuid.uuid4()
+    _install_fake_b2b(monkeypatch, product_id=product_id, sku_id=sku_id)
+
+    user = User.objects.create_user(
+        email="merge@example.com",
+        password="secret",
+        first_name="M",
+        last_name="U",
+    )
+    token = str(RefreshToken.for_user(user).access_token)
+
+    r = client.post("/api/v1/cart/merge", HTTP_AUTHORIZATION=f"Bearer {token}")
+    assert r.status_code == 400
+    assert r.json()["code"] == "VALIDATION_ERROR"
+    assert "X-Session-Id" in r.json()["message"]
 
 
 @pytest.mark.django_db
