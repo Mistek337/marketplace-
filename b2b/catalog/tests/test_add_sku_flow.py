@@ -131,6 +131,37 @@ class AddSKUFlowTests(TestCase):
             {"code": NOT_FOUND, "message": "Product not found"},
         )
 
+    def test_post_sku_without_auth_returns_unauthorized_shape(self):
+        product = Product.objects.create(
+            title="Phone",
+            description="d",
+            category=self.category,
+            seller_id=self.seller.id,
+            status=Product.Status.CREATED,
+        )
+        self.client.force_authenticate(user=None)
+        resp = self.client.post(self.url, self._payload(product_id=product.id), format="json")
+        self.assertEqual(resp.status_code, 401)
+        self.assertEqual(
+            resp.json(),
+            {"code": "UNAUTHORIZED", "message": "Authentication required"},
+        )
+
+    def test_post_sku_invalid_token_returns_unauthorized_shape(self):
+        product = Product.objects.create(
+            title="Phone",
+            description="d",
+            category=self.category,
+            seller_id=self.seller.id,
+            status=Product.Status.CREATED,
+        )
+        self.client.force_authenticate(user=None)
+        self.client.credentials(HTTP_AUTHORIZATION="Bearer not-a-jwt")
+        resp = self.client.post(self.url, self._payload(product_id=product.id), format="json")
+        self.assertEqual(resp.status_code, 401)
+        self.assertEqual(resp.json()["code"], "UNAUTHORIZED")
+        self.assertEqual(resp.json()["message"], "Invalid token")
+
     def test_add_sku_to_hard_blocked_returns_403(self):
         product = Product.objects.create(
             title="Blocked",

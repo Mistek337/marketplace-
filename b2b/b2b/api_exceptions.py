@@ -63,10 +63,10 @@ def b2b_exception_handler(exc, context):
 
     status_code = response.status_code
     if status_code == 401:
-        response.data = error_body(
-            code=UNAUTHORIZED,
-            message=_detail_message(data),
-        )
+        message = _detail_message(data)
+        if message not in ("Invalid token", "Invalid credentials", "Invalid refresh token"):
+            message = "Authentication required"
+        response.data = error_body(code=UNAUTHORIZED, message=message)
         return response
 
     if status_code in (400, 422) and isinstance(data, dict):
