@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-from rest_framework.exceptions import AuthenticationFailed, NotAuthenticated, PermissionDenied
+from django.http import Http404
+from rest_framework.exceptions import AuthenticationFailed, NotAuthenticated, NotFound, PermissionDenied
 from rest_framework.response import Response
 from rest_framework.views import exception_handler as drf_exception_handler
 
 from catalog.api_errors import (
     FORBIDDEN,
+    NOT_FOUND,
     UNAUTHORIZED,
     VALIDATION_ERROR,
     drf_validation_error,
@@ -45,6 +47,11 @@ def b2b_exception_handler(exc, context):
             error_body(code=FORBIDDEN, message=_detail_message(exc.detail)),
             status=403,
         )
+    if isinstance(exc, (Http404, NotFound)):
+        return Response(
+            error_body(code=NOT_FOUND, message="Not found"),
+            status=404,
+        )
 
     response = drf_exception_handler(exc, context)
     if response is None:
@@ -80,7 +87,7 @@ def b2b_exception_handler(exc, context):
     code_by_status = {
         400: VALIDATION_ERROR,
         403: FORBIDDEN,
-        404: "NOT_FOUND",
+        404: NOT_FOUND,
         409: "CONFLICT",
         503: "SERVICE_UNAVAILABLE",
     }

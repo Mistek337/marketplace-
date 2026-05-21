@@ -15,7 +15,7 @@ from .moderation_client import emit_product_created_event, emit_product_edited_e
 from .api_errors import (
     FORBIDDEN,
     NOT_FOUND,
-    UNAUTHORIZED,
+    NOT_OWNER,
     drf_validation_error,
     error_body,
 )
@@ -45,9 +45,12 @@ def _valid_service_key(request) -> bool:
     return service_key in {k for k in (b2c_key, moderation_key) if k}
 
 
-def _product_forbidden_response() -> Response:
+def _product_not_owner_response() -> Response:
     return Response(
-        error_body(code=FORBIDDEN, message="Product not found"),
+        error_body(
+            code=NOT_OWNER,
+            message="Product does not belong to the authenticated seller",
+        ),
         status=status.HTTP_403_FORBIDDEN,
     )
 
@@ -325,13 +328,18 @@ class ProductRetrieveUpdateAPIView(generics.RetrieveUpdateAPIView):
         if not request.user or not getattr(request.user, "is_authenticated", False):
             return _product_not_found_response()
 
-        product = self._resolve_product(request, kwargs.get("pk", ""))
+        try:
+            product_id = UUID(str(kwargs.get("pk", "")))
+        except (TypeError, ValueError):
+            return _product_not_found_response()
+
+        product = self.get_queryset().filter(id=product_id).first()
         if product is None:
             return _product_not_found_response()
 
         seller_id = getattr(request.user, "id", None)
         if product.seller_id != seller_id:
-            return _product_forbidden_response()
+            return _product_not_owner_response()
 
         if product.status == Product.Status.HARD_BLOCKED:
             return Response(
@@ -389,8 +397,10 @@ class SKUCreateAPIView(generics.CreateAPIView):
 
         with transaction.atomic():
             product = Product.objects.select_for_update().filter(id=data["product_id"]).first()
-            if product is None or product.seller_id != seller_id:
-                return _product_forbidden_response()
+            if product is None:
+                return _product_not_found_response()
+            if product.seller_id != seller_id:
+                return _product_not_owner_response()
 
             if product.status == Product.Status.HARD_BLOCKED:
                 return Response(
@@ -479,8 +489,8 @@ class SKURetrieveUpdateAPIView(generics.RetrieveUpdateAPIView):
             sku = self.get_object()
         except Http404:
             return Response(
-                error_body(code=FORBIDDEN, message="SKU not found"),
-                status=status.HTTP_403_FORBIDDEN,
+                error_body(code=NOT_FOUND, message="SKU not found"),
+                status=status.HTTP_404_NOT_FOUND,
             )
 
         if sku.product.status == Product.Status.HARD_BLOCKED:

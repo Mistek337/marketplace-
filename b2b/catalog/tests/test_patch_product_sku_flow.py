@@ -4,7 +4,7 @@ from unittest.mock import patch
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
-from catalog.api_errors import FORBIDDEN
+from catalog.api_errors import NOT_FOUND, NOT_OWNER
 from catalog.models import Category, ModerationOutboxEvent, Product, ProductCharacteristic, SKU
 from sellers.models import Seller
 
@@ -79,14 +79,59 @@ class PatchProductSkuFlowTests(TestCase):
         self.assertEqual(resp.json()["price"], 9_500_000)
         emit_mock.assert_called_once_with(product_id=product.id, seller_id=product.seller_id)
 
-    def test_patch_unknown_sku_returns_403_not_404(self):
+    def test_patch_unknown_sku_returns_404_not_found(self):
         resp = self.client.patch(
             "/api/v1/skus/00000000-0000-0000-0000-000000000099",
             {"price": 1},
             format="json",
         )
+        self.assertEqual(resp.status_code, 404)
+        self.assertEqual(
+            resp.json(),
+            {"code": NOT_FOUND, "message": "SKU not found"},
+        )
+
+    def test_patch_other_sellers_product_returns_not_owner(self):
+        other = Seller.objects.create(
+            email="patch-other@example.com",
+            password="hashed",
+            first_name="Other",
+            last_name="Seller",
+            company_name="Other Ltd",
+        )
+        product = Product.objects.create(
+            title="Other phone",
+            description="Desc",
+            category=self.category,
+            seller_id=other.id,
+            status=Product.Status.MODERATED,
+        )
+        resp = self.client.patch(
+            f"/api/v1/products/{product.id}",
+            {"title": "Hacked"},
+            format="json",
+        )
         self.assertEqual(resp.status_code, 403)
-        self.assertEqual(resp.json()["code"], "FORBIDDEN")
+        self.assertEqual(
+            resp.json(),
+            {
+                "code": NOT_OWNER,
+                "message": "Product does not belong to the authenticated seller",
+            },
+        )
+
+    def test_patch_product_invalid_token_returns_unauthorized(self):
+        self.client.force_authenticate(user=None)
+        product = self._product(status=Product.Status.CREATED)
+        self.client.credentials(HTTP_AUTHORIZATION="Bearer not-a-jwt")
+        resp = self.client.patch(
+            f"/api/v1/products/{product.id}",
+            {"title": "X"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 401)
+        self.assertEqual(resp.json()["code"], "UNAUTHORIZED")
+        self.assertEqual(resp.json()["message"], "Invalid token")
 
     def test_patch_product_null_characteristics_clears_list(self):
         product = self._product(status=Product.Status.CREATED)
