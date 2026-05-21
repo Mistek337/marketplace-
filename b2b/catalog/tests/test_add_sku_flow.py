@@ -4,7 +4,7 @@ from unittest.mock import patch
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
-from catalog.api_errors import FORBIDDEN
+from catalog.api_errors import FORBIDDEN, NOT_FOUND, NOT_OWNER
 from catalog.moderation_client import emit_product_created_event
 from catalog.models import Category, Product, SKU, SKUImage
 from sellers.models import Seller
@@ -93,7 +93,7 @@ class AddSKUFlowTests(TestCase):
         self.assertEqual(product.status, Product.Status.ON_MODERATION)
         emit_mock.assert_not_called()
 
-    def test_add_sku_to_other_sellers_product_returns_403(self):
+    def test_add_sku_to_other_sellers_product_returns_not_owner(self):
         other = Seller.objects.create(
             email="other-sku@example.com",
             password="hashed",
@@ -111,16 +111,25 @@ class AddSKUFlowTests(TestCase):
 
         resp = self.client.post(self.url, self._payload(product_id=product.id), format="json")
         self.assertEqual(resp.status_code, 403)
-        self.assertEqual(resp.json()["code"], FORBIDDEN)
+        self.assertEqual(
+            resp.json(),
+            {
+                "code": NOT_OWNER,
+                "message": "Product does not belong to the authenticated seller",
+            },
+        )
 
-    def test_add_sku_to_unknown_product_returns_403(self):
+    def test_add_sku_to_unknown_product_returns_404(self):
         resp = self.client.post(
             self.url,
             self._payload(product_id="00000000-0000-0000-0000-000000000099"),
             format="json",
         )
-        self.assertEqual(resp.status_code, 403)
-        self.assertEqual(resp.json()["code"], FORBIDDEN)
+        self.assertEqual(resp.status_code, 404)
+        self.assertEqual(
+            resp.json(),
+            {"code": NOT_FOUND, "message": "Product not found"},
+        )
 
     def test_add_sku_to_hard_blocked_returns_403(self):
         product = Product.objects.create(
