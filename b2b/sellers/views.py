@@ -186,17 +186,14 @@ class SellerLogoutView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
-class SellerProfileView(APIView):
+class SellerMeAPIView(APIView):
+    """OpenAPI: GET/PATCH/DELETE /api/v1/sellers/me."""
+
     authentication_classes = [SellerJWTAuthentication]
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
         return Response(SellerResponseSerializer(request.user).data, status=status.HTTP_200_OK)
-
-
-class SellerProfileUpdateView(APIView):
-    authentication_classes = [SellerJWTAuthentication]
-    permission_classes = [permissions.IsAuthenticated]
 
     def patch(self, request):
         serializer = SellerUpdateSerializer(
@@ -206,11 +203,12 @@ class SellerProfileUpdateView(APIView):
         seller = serializer.save()
         return Response(SellerResponseSerializer(seller).data, status=status.HTTP_200_OK)
 
-
-class SellerProfileDeleteView(APIView):
-    authentication_classes = [SellerJWTAuthentication]
-    permission_classes = [permissions.IsAuthenticated]
-
     def delete(self, request):
         request.user.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# Backward-compatible aliases (deprecated paths removed from urls).
+SellerProfileView = SellerMeAPIView
+SellerProfileUpdateView = SellerMeAPIView
+SellerProfileDeleteView = SellerMeAPIView

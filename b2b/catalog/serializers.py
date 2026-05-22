@@ -1,5 +1,7 @@
+from django.db import transaction
 from rest_framework import serializers
 
+from .category_tree import build_categories_index, category_level, category_path
 from .openapi_patch import _NOT_PROVIDED, is_patch_null, pop_patch_value
 from .models import (
     Category,
@@ -12,18 +14,44 @@ from .models import (
 )
 
 
-class CategorySerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Category
-        fields = ('id', 'name', 'parent_id', 'created_at')
+class CategoryResponseSerializer(serializers.ModelSerializer):
+    """OpenAPI CategoryResponse."""
 
-
-class CategoryFlatSerializer(serializers.ModelSerializer):
     parent_id = serializers.UUIDField(allow_null=True, read_only=True)
+    level = serializers.SerializerMethodField()
+    path = serializers.SerializerMethodField()
 
     class Meta:
         model = Category
-        fields = ('id', 'name', 'parent_id', 'created_at')
+        fields = (
+            'id',
+            'name',
+            'parent_id',
+            'level',
+            'path',
+            'is_active',
+            'created_at',
+        )
+
+    def _categories_index(self) -> dict[str, Category]:
+        index = self.context.get('categories_index')
+        if index is not None:
+            return index
+        return build_categories_index()
+
+    def get_level(self, obj: Category) -> int:
+        return category_level(obj, categories_index=self._categories_index())
+
+    def get_path(self, obj: Category) -> list[str]:
+        return category_path(obj, categories_index=self._categories_index())
+
+
+class CategorySerializer(CategoryResponseSerializer):
+    """Алиас для вложенных product/category полей."""
+
+
+class CategoryFlatSerializer(CategoryResponseSerializer):
+    """Алиас для списка категорий (OpenAPI CategoryResponse)."""
 
 
 class CategoryCreateSerializer(serializers.ModelSerializer):
@@ -47,12 +75,11 @@ class CategoryCreateSerializer(serializers.ModelSerializer):
         return Category.objects.create(**validated_data)
 
 
-class CategoryWithChildrenResponseSerializer(serializers.ModelSerializer):
-    children = CategoryFlatSerializer(many=True, read_only=True)
+class CategoryWithChildrenResponseSerializer(CategoryResponseSerializer):
+    children = CategoryResponseSerializer(many=True, read_only=True)
 
-    class Meta:
-        model = Category
-        fields = ('id', 'name', 'parent_id', 'created_at', 'children')
+    class Meta(CategoryResponseSerializer.Meta):
+        fields = CategoryResponseSerializer.Meta.fields + ('children',)
 
 
 class CategoryUpdateSerializer(serializers.ModelSerializer):
@@ -417,21 +444,22 @@ class ProductCreateSerializer(serializers.Serializer):
         characteristics_data = validated_data.pop('characteristics', [])
         request = self.context.get('request')
 
-        product = Product.objects.create(
-            title=validated_data['title'],
-            description=validated_data['description'],
-            slug=slug,
-            category=category,
-            seller_id=getattr(getattr(request, 'user', None), 'id', None),
-            status=Product.Status.CREATED,
-        )
-        product.ensure_slug()
-        product.save(update_fields=['slug'])
+        with transaction.atomic():
+            product = Product.objects.create(
+                title=validated_data['title'],
+                description=validated_data['description'],
+                slug=slug,
+                category=category,
+                seller_id=getattr(getattr(request, 'user', None), 'id', None),
+                status=Product.Status.CREATED,
+            )
+            product.ensure_slug()
+            product.save(update_fields=['slug'])
 
-        for row in images_data:
-            ProductImage.objects.create(product=product, **row)
-        for row in characteristics_data:
-            ProductCharacteristic.objects.create(product=product, **row)
+            for row in images_data:
+                ProductImage.objects.create(product=product, **row)
+            for row in characteristics_data:
+                ProductCharacteristic.objects.create(product=product, **row)
 
         return product
 

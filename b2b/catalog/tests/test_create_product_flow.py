@@ -1,7 +1,9 @@
+from unittest.mock import patch
+
 from django.test import TestCase
 from rest_framework.test import APIClient
 
-from catalog.models import Category, Product
+from catalog.models import Category, Product, ProductImage
 from sellers.models import Seller
 
 
@@ -128,3 +130,21 @@ class CreateProductFlowTests(TestCase):
         payload["category_id"] = "not-a-uuid"
         resp = self.client.post(self.url, data=payload, format="json")
         self._assert_validation_error(resp, field="category_id")
+
+    @patch("catalog.serializers.ProductImage.objects.create")
+    def test_create_product_rolls_back_when_image_insert_fails(self, create_mock):
+        from catalog.serializers import ProductCreateSerializer
+
+        create_mock.side_effect = RuntimeError("db error")
+        request = type("Req", (), {"user": self.seller})()
+        serializer = ProductCreateSerializer(
+            data=self._payload(),
+            context={"request": request},
+        )
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+
+        with self.assertRaises(RuntimeError):
+            serializer.save()
+
+        self.assertEqual(Product.objects.count(), 0)
+        self.assertEqual(ProductImage.objects.count(), 0)

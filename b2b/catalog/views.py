@@ -16,12 +16,14 @@ from .api_errors import (
     FORBIDDEN,
     NOT_FOUND,
     NOT_OWNER,
+    UNAUTHORIZED,
     drf_validation_error,
     error_body,
 )
+from .category_tree import build_categories_index
 from .serializers import (
     CategoryCreateSerializer,
-    CategoryFlatSerializer,
+    CategoryResponseSerializer,
     CategoryUpdateSerializer,
     CategoryWithChildrenResponseSerializer,
     ProductMyListItemSerializer,
@@ -82,10 +84,15 @@ class CategoryListAPIView(generics.ListCreateAPIView):
             return [permissions.IsAuthenticated()]
         return [permissions.AllowAny()]
 
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context["categories_index"] = build_categories_index()
+        return context
+
     def get_serializer_class(self):
         if self.request.method == "POST":
             return CategoryCreateSerializer
-        return CategoryFlatSerializer
+        return CategoryResponseSerializer
 
     def get_queryset(self):
         qs = Category.objects.all().order_by("id")
@@ -112,6 +119,11 @@ class CategoryDetailAPIView(generics.RetrieveUpdateAPIView):
     queryset = Category.objects.prefetch_related("children").all()
     serializer_class = CategoryWithChildrenResponseSerializer
     lookup_field = "id"
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context["categories_index"] = build_categories_index()
+        return context
 
     def get_permissions(self):
         if self.request.method in ("PATCH", "DELETE"):
