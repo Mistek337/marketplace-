@@ -11,6 +11,8 @@ _KNOWN_FILTER_KEYS = frozenset(
     {"category_id", "price_min", "price_max", "seller_id", "attributes"}
 )
 
+OPENAPI_SORT_VALUES = frozenset({"price_asc", "price_desc", "popularity", "new"})
+
 _OPENAPI_TO_B2B_SORT = {
     "price_asc": "price_asc",
     "price_desc": "price_desc",
@@ -68,9 +70,8 @@ def parse_catalog_list_params(request: Request):
 
     sort_raw = qp.get("sort") or "popularity"
     if sort_raw not in _OPENAPI_TO_B2B_SORT:
-        return None, (
-            "sort must be one of: price_asc, price_desc, popularity, new"
-        )
+        allowed = ", ".join(sorted(OPENAPI_SORT_VALUES))
+        return None, f"Invalid sort parameter; allowed values: {allowed}"
     sort = _OPENAPI_TO_B2B_SORT[sort_raw]
 
     category_id = qp.get("category_id")

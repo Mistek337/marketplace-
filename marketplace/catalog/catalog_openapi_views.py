@@ -14,17 +14,23 @@ from .openapi_catalog import (
     to_catalog_product_detail,
     to_category_tree_nodes,
 )
-from .request_parsing import parse_catalog_list_params, parse_similar_limit_param
+from .facets_service import build_catalog_facets
+from .request_parsing import OPENAPI_SORT_VALUES, parse_catalog_list_params, parse_similar_limit_param
 from .api_errors import map_b2b_error
 
 logger = logging.getLogger(__name__)
 
 
-def _validation_error(message: str, *, status_code=status.HTTP_400_BAD_REQUEST):
-    return Response(
-        {"code": "VALIDATION_ERROR", "message": message},
-        status=status_code,
-    )
+def _validation_error(
+    message: str,
+    *,
+    status_code=status.HTTP_400_BAD_REQUEST,
+    details=None,
+):
+    body = {"code": "VALIDATION_ERROR", "message": message}
+    if details is not None:
+        body["details"] = details
+    return Response(body, status=status_code)
 
 
 def _load_categories(client: B2BClient):
@@ -44,7 +50,10 @@ def catalog_products_list(request):
     """Общая логика GET листинга → PaginatedCatalogProducts."""
     params, err = parse_catalog_list_params(request)
     if err:
-        return _validation_error(err)
+        details = None
+        if "allowed values" in err.lower():
+            details = {"sort": sorted(OPENAPI_SORT_VALUES)}
+        return _validation_error(err, details=details)
 
     client = B2BClient()
     try:
@@ -83,6 +92,37 @@ def catalog_products_list(request):
 
 
 class CatalogProductsListView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        return catalog_products_list(request)
+
+
+class CatalogFacetsView(APIView):
+    """GET /api/v1/catalog/facets — подсчёты значений фильтров (канон b2c-1-catalog-filters)."""
+
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        params, err = parse_catalog_list_params(request)
+        if err:
+            details = None
+            if "allowed values" in err.lower():
+                details = {"sort": sorted(OPENAPI_SORT_VALUES)}
+            return _validation_error(err, details=details)
+
+        client = B2BClient()
+        try:
+            facets = build_catalog_facets(client, params)
+        except B2BClientError as exc:
+            return map_b2b_error(exc)
+
+        return Response(facets)
+
+
+class ProductsListAliasView(APIView):
+    """GET /api/v1/products — алиас листинга (тот же контракт, что catalog/products)."""
+
     permission_classes = [permissions.AllowAny]
 
     def get(self, request):
