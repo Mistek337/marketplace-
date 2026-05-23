@@ -63,6 +63,60 @@ class AddSKUFlowTests(TestCase):
         self.assertEqual(product.status, Product.Status.ON_MODERATION)
         emit_mock.assert_called_once_with(product_id=product.id, seller_id=product.seller_id)
 
+    @patch("catalog.views.emit_product_edited_event")
+    def test_add_sku_to_moderated_product_transitions_to_on_moderation(self, emit_mock):
+        product = Product.objects.create(
+            title="Phone",
+            description="d",
+            category=self.category,
+            seller_id=self.seller.id,
+            status=Product.Status.MODERATED,
+        )
+        existing = SKU.objects.create(
+            product=product,
+            name="128GB",
+            price=10_000_000,
+            cost_price=8_000_000,
+            active_quantity=5,
+            reserved_quantity=0,
+        )
+        SKUImage.objects.create(
+            sku=existing,
+            url="https://example.com/old.jpg",
+            ordering=0,
+        )
+
+        resp = self.client.post(self.url, self._payload(product_id=product.id), format="json")
+        self.assertEqual(resp.status_code, 201)
+
+        product.refresh_from_db()
+        self.assertEqual(product.status, Product.Status.ON_MODERATION)
+        emit_mock.assert_called_once_with(product_id=product.id, seller_id=product.seller_id)
+
+    @patch("catalog.views.emit_product_edited_event")
+    def test_add_sku_to_blocked_product_transitions_to_on_moderation(self, emit_mock):
+        product = Product.objects.create(
+            title="Phone",
+            description="d",
+            category=self.category,
+            seller_id=self.seller.id,
+            status=Product.Status.BLOCKED,
+        )
+        SKU.objects.create(
+            product=product,
+            name="128GB",
+            price=10_000_000,
+            active_quantity=0,
+            reserved_quantity=0,
+        )
+
+        resp = self.client.post(self.url, self._payload(product_id=product.id), format="json")
+        self.assertEqual(resp.status_code, 201)
+
+        product.refresh_from_db()
+        self.assertEqual(product.status, Product.Status.ON_MODERATION)
+        emit_mock.assert_called_once_with(product_id=product.id, seller_id=product.seller_id)
+
     @patch("catalog.views.emit_product_created_event")
     def test_second_sku_no_state_change(self, emit_mock):
         product = Product.objects.create(

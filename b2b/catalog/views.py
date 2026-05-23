@@ -403,7 +403,8 @@ class SKUCreateAPIView(generics.CreateAPIView):
 
         data = serializer.validated_data
         seller_id = getattr(request.user, "id", None)
-        emit_after_commit = False
+        emit_created = False
+        emit_edited = False
         emit_product_id = None
         emit_seller_id = None
 
@@ -444,12 +445,21 @@ class SKUCreateAPIView(generics.CreateAPIView):
             if not had_skus and product.status == Product.Status.CREATED:
                 product.status = Product.Status.ON_MODERATION
                 product.save(update_fields=["status", "updated_at"])
-                emit_after_commit = True
+                emit_created = True
+                emit_product_id = product.id
+                emit_seller_id = product.seller_id
+            elif _transition_product_to_moderation_on_edit(product):
+                emit_edited = True
                 emit_product_id = product.id
                 emit_seller_id = product.seller_id
 
-        if emit_after_commit:
+        if emit_created:
             emit_product_created_event(
+                product_id=emit_product_id,
+                seller_id=emit_seller_id,
+            )
+        elif emit_edited:
+            emit_product_edited_event(
                 product_id=emit_product_id,
                 seller_id=emit_seller_id,
             )
