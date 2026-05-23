@@ -7,12 +7,16 @@ from .catalog_openapi_views import (
     CatalogCategoriesListView,
     CatalogCategoriesTreeView,
     CatalogCollectionsView,
+    CatalogFacetsView,
     CatalogProductSimilarView,
     CatalogProductsListView,
+    ProductsListAliasView,
 )
 from .views import ProductDetailView
 
 urlpatterns = [
+    path("products", ProductsListAliasView.as_view()),
+    path("catalog/facets", CatalogFacetsView.as_view()),
     path("catalog/categories", CatalogCategoriesListView.as_view()),
     path("catalog/categories/tree", CatalogCategoriesTreeView.as_view()),
     path("catalog/products", CatalogProductsListView.as_view()),

@@ -19,10 +19,10 @@ def map_b2b_error(exc):
             {"code": "FORBIDDEN", "message": "Forbidden"},
             status=status.HTTP_403_FORBIDDEN,
         )
-    if exc.status_code == 503:
+    if exc.status_code in (502, 503):
         return Response(
-            {"code": "ERROR", "message": "Catalog service unavailable"},
-            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            {"code": "SERVICE_UNAVAILABLE", "message": "Catalog service unavailable"},
+            status=status.HTTP_502_BAD_GATEWAY,
         )
     return Response(
         {"code": "ERROR", "message": "Catalog service error"},
