@@ -114,3 +114,7 @@ MODERATION_BASE_URL = os.environ.get("MODERATION_BASE_URL", "")
 B2B_TO_MODERATION_KEY = os.environ.get("B2B_TO_MODERATION_KEY", "")
 MODERATION_TIMEOUT = float(os.environ.get("MODERATION_TIMEOUT", "5"))
 MODERATION_TO_B2B_KEY = os.environ.get("MODERATION_TO_B2B_KEY", "")
+
+B2C_EVENTS_BASE_URL = os.environ.get("B2C_EVENTS_BASE_URL", "")
+B2B_TO_B2C_KEY = os.environ.get("B2B_TO_B2C_KEY", "")
+B2C_EVENTS_TIMEOUT = float(os.environ.get("B2C_EVENTS_TIMEOUT", "5"))
