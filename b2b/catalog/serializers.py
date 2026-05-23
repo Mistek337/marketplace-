@@ -42,7 +42,7 @@ class CategoryResponseSerializer(serializers.ModelSerializer):
     def get_level(self, obj: Category) -> int:
         return category_level(obj, categories_index=self._categories_index())
 
-    def get_path(self, obj: Category) -> list[str]:
+    def get_path(self, obj: Category) -> str:
         return category_path(obj, categories_index=self._categories_index())
 
 

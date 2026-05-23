@@ -9,8 +9,8 @@ class CategoryResponseTests(TestCase):
         self.client = APIClient()
 
     def test_list_categories_returns_openapi_shape(self):
-        root = Category.objects.create(name="Электроника", is_active=True)
-        child = Category.objects.create(name="Смартфоны", parent=root, is_active=True)
+        root = Category.objects.create(name="Electronics", is_active=True)
+        child = Category.objects.create(name="Phones", parent=root, is_active=True)
 
         resp = self.client.get("/api/v1/categories")
         self.assertEqual(resp.status_code, 200)
@@ -24,9 +24,10 @@ class CategoryResponseTests(TestCase):
             self.assertIn(key, child_data, msg=f"missing {key} on child")
 
         self.assertEqual(root_data["level"], 0)
-        self.assertEqual(root_data["path"], ["Электроника"])
+        self.assertEqual(root_data["path"], "electronics")
+        self.assertIsInstance(root_data["path"], str)
         self.assertTrue(root_data["is_active"])
 
         self.assertEqual(child_data["level"], 1)
-        self.assertEqual(child_data["path"], ["Электроника", "Смартфоны"])
+        self.assertEqual(child_data["path"], "electronics/phones")
         self.assertEqual(child_data["parent_id"], str(root.id))
