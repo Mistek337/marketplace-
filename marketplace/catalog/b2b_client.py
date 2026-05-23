@@ -5,10 +5,21 @@ from django.conf import settings
 
 
 class B2BClientError(Exception):
-    def __init__(self, status_code, message):
+    def __init__(self, status_code, message, *, body=None):
         self.status_code = status_code
         self.message = message
+        self.body = body if isinstance(body, dict) else None
         super().__init__(message)
+
+
+def _parse_error_body(detail: str) -> dict | None:
+    if not detail:
+        return None
+    try:
+        parsed = json.loads(detail)
+    except json.JSONDecodeError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
 
 
 class B2BClient:
@@ -58,7 +69,9 @@ class B2BClient:
                 return json.loads(body) if body else {}
         except error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="ignore")
-            raise B2BClientError(exc.code, detail or "B2B HTTP error") from exc
+            body = _parse_error_body(detail)
+            message = (body or {}).get("message") or detail or "B2B HTTP error"
+            raise B2BClientError(exc.code, message, body=body) from exc
         except error.URLError as exc:
             raise B2BClientError(503, f"B2B unavailable: {exc}") from exc
 
@@ -151,9 +164,37 @@ class B2BClient:
                 return json.loads(raw) if raw else []
         except error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="ignore")
-            raise B2BClientError(exc.code, detail or "B2B HTTP error") from exc
+            body = _parse_error_body(detail)
+            message = (body or {}).get("message") or detail or "B2B HTTP error"
+            raise B2BClientError(exc.code, message, body=body) from exc
         except error.URLError as exc:
             raise B2BClientError(503, f"B2B unavailable: {exc}") from exc
+
+    def reserve_inventory(self, *, idempotency_key, order_id, items):
+        """POST /api/v1/inventory/reserve — all-or-nothing."""
+        return self._post_json(
+            self._api_path("inventory", "reserve"),
+            {
+                "idempotency_key": str(idempotency_key),
+                "order_id": str(order_id),
+                "items": [
+                    {"sku_id": str(row["sku_id"]), "quantity": int(row["quantity"])}
+                    for row in items
+                ],
+            },
+        )
+
+    def unreserve_inventory(self, *, order_id, items):
+        return self._post_json(
+            self._api_path("inventory", "unreserve"),
+            {
+                "order_id": str(order_id),
+                "items": [
+                    {"sku_id": str(row["sku_id"]), "quantity": int(row["quantity"])}
+                    for row in items
+                ],
+            },
+        )
 
     def get_product(self, product_id):
         return self._get(self._api_path("public", "products", str(product_id)))
