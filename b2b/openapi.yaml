@@ -1,0 +1,106 @@
+# NeoMarket B2B — фрагмент Inventory (полная схема в neomarket-protocols).
+# Реализация: POST /api/v1/inventory/reserve, POST /api/v1/inventory/unreserve
+
+openapi: 3.0.3
+info:
+  title: NeoMarket B2B Service — Inventory fragment
+  version: 1.0.0
+
+paths:
+  /api/v1/inventory/reserve:
+    post:
+      tags: [Inventory]
+      operationId: reserveInventory
+      parameters:
+        - name: X-Service-Key
+          in: header
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ReserveRequest" }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReserveResponse" }
+        "409":
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/v1/inventory/unreserve:
+    post:
+      tags: [Inventory]
+      operationId: unreserveInventory
+      parameters:
+        - name: X-Service-Key
+          in: header
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InventoryOrderRequest" }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InventoryOrderResponse" }
+
+components:
+  schemas:
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code: { type: string }
+        message: { type: string }
+        details: { type: object, additionalProperties: true, nullable: true }
+
+    InventoryItem:
+      type: object
+      required: [sku_id, quantity]
+      properties:
+        sku_id: { type: string, format: uuid }
+        quantity: { type: integer, minimum: 1 }
+
+    ReserveRequest:
+      type: object
+      required: [idempotency_key, order_id, items]
+      properties:
+        idempotency_key: { type: string, format: uuid }
+        order_id: { type: string, format: uuid }
+        items:
+          type: array
+          minItems: 1
+          items: { $ref: "#/components/schemas/InventoryItem" }
+
+    ReserveResponse:
+      type: object
+      required: [order_id, status, reserved_at]
+      properties:
+        order_id: { type: string, format: uuid }
+        status: { type: string, enum: [RESERVED] }
+        reserved_at: { type: string, format: date-time }
+
+    InventoryOrderRequest:
+      type: object
+      required: [order_id, items]
+      properties:
+        order_id: { type: string, format: uuid }
+        items:
+          type: array
+          minItems: 1
+          items: { $ref: "#/components/schemas/InventoryItem" }
+
+    InventoryOrderResponse:
+      type: object
+      required: [order_id, status, processed_at]
+      properties:
+        order_id: { type: string, format: uuid }
+        status: { type: string, enum: [UNRESERVED] }
+        processed_at: { type: string, format: date-time }

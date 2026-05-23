@@ -177,3 +177,35 @@ class ModerationOutboxEvent(models.Model):
 
     class Meta:
         ordering = ['created_at']
+
+
+class InventoryReservation(models.Model):
+    """Успешный reserve для идемпотентности (idempotency_key TTL 1ч, unreserve по order_id)."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    idempotency_key = models.UUIDField(unique=True, db_index=True)
+    order_id = models.UUIDField(unique=True, db_index=True)
+    items = models.JSONField()
+    response_payload = models.JSONField()
+    reserved_at = models.DateTimeField()
+    unreserved_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['created_at']
+
+
+class B2COutboxEvent(models.Model):
+    """Outbox событий B2B → B2C (SKU_OUT_OF_STOCK и др.)."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    idempotency_key = models.UUIDField(unique=True, db_index=True)
+    event = models.CharField(max_length=32)
+    sku_id = models.UUIDField(db_index=True)
+    product_id = models.UUIDField(db_index=True)
+    payload = models.JSONField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    sent_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['created_at']

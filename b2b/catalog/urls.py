@@ -7,6 +7,7 @@ from .public_views import (
     PublicProductSimilarAPIView,
     PublicSKURetrieveAPIView,
 )
+from .inventory_views import ReserveInventoryAPIView, UnreserveInventoryAPIView
 from .views import (
     CategoryDetailAPIView,
     CategoryListAPIView,
@@ -75,4 +76,8 @@ urlpatterns = [
     path('skus', SKUCreateAPIView.as_view(), name='sku-create-no-slash'),
     path('skus/<uuid:pk>/', SKURetrieveUpdateAPIView.as_view(), name='sku-detail'),
     path('skus/<uuid:pk>', SKURetrieveUpdateAPIView.as_view(), name='sku-detail-no-slash'),
+    path('inventory/reserve/', ReserveInventoryAPIView.as_view(), name='inventory-reserve'),
+    path('inventory/reserve', ReserveInventoryAPIView.as_view(), name='inventory-reserve-no-slash'),
+    path('inventory/unreserve/', UnreserveInventoryAPIView.as_view(), name='inventory-unreserve'),
+    path('inventory/unreserve', UnreserveInventoryAPIView.as_view(), name='inventory-unreserve-no-slash'),
 ]
