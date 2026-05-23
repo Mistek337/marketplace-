@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from django.utils.text import slugify
+
 from .models import Category
 
 
@@ -39,5 +41,19 @@ def category_level(category: Category, *, categories_index: dict[str, Category])
     return max(0, len(category_ancestry(category, categories_index=categories_index)) - 1)
 
 
-def category_path(category: Category, *, categories_index: dict[str, Category]) -> list[str]:
-    return [node.name for node in category_ancestry(category, categories_index=categories_index)]
+def _category_path_segment(category: Category) -> str:
+    segment = slugify(category.name, allow_unicode=True)
+    if not segment:
+        segment = slugify(category.name)
+    if not segment:
+        segment = f"category-{str(category.id)[:8]}"
+    return segment
+
+
+def category_path(category: Category, *, categories_index: dict[str, Category]) -> str:
+    """Materialized path: slug-сегменты от корня, через `/` (OpenAPI CategoryResponse.path)."""
+    segments = [
+        _category_path_segment(node)
+        for node in category_ancestry(category, categories_index=categories_index)
+    ]
+    return "/".join(segments)
