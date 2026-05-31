@@ -12,3 +12,7 @@ class OrderCreateRequestSerializer(serializers.Serializer):
     payment_method_id = serializers.UUIDField()
     comment = serializers.CharField(max_length=1000, required=False, allow_blank=True, default="")
     items_snapshot = OrderItemSnapshotSerializer(many=True, required=False)
+
+
+class OrderCancelRequestSerializer(serializers.Serializer):
+    reason = serializers.CharField(max_length=500, required=False, allow_blank=True, default="")
