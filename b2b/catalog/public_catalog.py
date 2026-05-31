@@ -29,6 +29,17 @@ def require_b2c_service_key(request: Request) -> Response | None:
     return None
 
 
+def require_moderation_service_key(request: Request) -> Response | None:
+    service_key = request.headers.get("X-Service-Key")
+    expected = getattr(settings, "MODERATION_TO_B2B_KEY", "") or ""
+    if not expected or service_key != expected:
+        return Response(
+            error_body(code=UNAUTHORIZED, message="Missing or invalid X-Service-Key"),
+            status=status.HTTP_401_UNAUTHORIZED,
+        )
+    return None
+
+
 def _parse_optional_uuid(
     param_name: str,
     raw: str | None,

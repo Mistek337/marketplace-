@@ -8,6 +8,7 @@ from .public_views import (
     PublicSKURetrieveAPIView,
 )
 from .inventory_views import ReserveInventoryAPIView, UnreserveInventoryAPIView
+from .moderation_events_views import ReceiveModerationEventAPIView
 from .views import (
     CategoryDetailAPIView,
     CategoryListAPIView,
@@ -80,4 +81,14 @@ urlpatterns = [
     path('inventory/reserve', ReserveInventoryAPIView.as_view(), name='inventory-reserve-no-slash'),
     path('inventory/unreserve/', UnreserveInventoryAPIView.as_view(), name='inventory-unreserve'),
     path('inventory/unreserve', UnreserveInventoryAPIView.as_view(), name='inventory-unreserve-no-slash'),
+    path(
+        'moderation/events/',
+        ReceiveModerationEventAPIView.as_view(),
+        name='moderation-events',
+    ),
+    path(
+        'moderation/events',
+        ReceiveModerationEventAPIView.as_view(),
+        name='moderation-events-no-slash',
+    ),
 ]
