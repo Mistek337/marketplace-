@@ -72,13 +72,17 @@ class OrderCreateAPIView(APIView):
 
 
 class OrderCancelAPIView(APIView):
-    """POST /api/v1/orders/{order_id}/cancel — OpenAPI cancel order."""
+    """
+    OpenAPI POST /api/v1/orders/{order_id}/cancel.
+    Responses: 200 OrderResponse, 409 Error (CANCEL_NOT_ALLOWED).
+    """
 
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request, order_id):
         serializer = OrderCancelRequestSerializer(data=request.data or {})
-        if not serializer.is_valid():
+        serializer.is_valid(raise_exception=False)
+        if serializer.errors:
             return Response(
                 error_body(
                     code="VALIDATION_ERROR",
@@ -96,11 +100,15 @@ class OrderCancelAPIView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
+        reason = ""
+        if serializer.validated_data:
+            reason = serializer.validated_data.get("reason") or ""
+
         try:
             order = cancel_order(
                 buyer=request.user,
                 order_id=order_uuid,
-                reason=serializer.validated_data.get("reason") or "",
+                reason=reason,
             )
         except CancelError as exc:
             return Response(

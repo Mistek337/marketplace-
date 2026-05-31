@@ -144,9 +144,28 @@ def test_unreserve_failure_transitions_to_cancel_pending(auth_client, buyer, mon
 
 
 @pytest.mark.django_db
-def test_cancel_assembling_order_returns_409(auth_client, buyer, monkeypatch):
+def test_cancel_assembling_order_transitions_to_cancelled(auth_client, buyer, monkeypatch):
     order = _create_paid_order(buyer)
     order.status = Order.Status.ASSEMBLING
+    order.save(update_fields=["status"])
+    _install_unreserve(monkeypatch)
+
+    response = auth_client.post(
+        f"/api/v1/orders/{order.id}/cancel",
+        format="json",
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "CANCELLED"
+
+    order.refresh_from_db()
+    assert order.status == Order.Status.CANCELLED
+
+
+@pytest.mark.django_db
+def test_cancel_delivering_order_returns_409(auth_client, buyer, monkeypatch):
+    order = _create_paid_order(buyer)
+    order.status = Order.Status.DELIVERING
     order.save(update_fields=["status"])
     _install_unreserve(monkeypatch)
 
@@ -158,10 +177,10 @@ def test_cancel_assembling_order_returns_409(auth_client, buyer, monkeypatch):
     assert response.status_code == 409
     body = response.json()
     assert body["code"] == "CANCEL_NOT_ALLOWED"
-    assert body["details"]["status"] == "ASSEMBLING"
+    assert body["details"]["status"] == "DELIVERING"
 
     order.refresh_from_db()
-    assert order.status == Order.Status.ASSEMBLING
+    assert order.status == Order.Status.DELIVERING
 
 
 @pytest.mark.django_db

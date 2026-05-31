@@ -18,7 +18,14 @@ from .models import Address, Order, OrderItem, PaymentMethod, hash_checkout_requ
 logger = logging.getLogger(__name__)
 
 IDEMPOTENCY_TTL = timedelta(hours=1)
-CANCELLABLE_STATUSES = frozenset({Order.Status.CREATED, Order.Status.PAID})
+# OpenAPI POST /orders/{order_id}/cancel: CREATED, PAID, ASSEMBLING
+CANCELLABLE_STATUSES = frozenset(
+    {
+        Order.Status.CREATED,
+        Order.Status.PAID,
+        Order.Status.ASSEMBLING,
+    }
+)
 
 
 class CheckoutError(Exception):
