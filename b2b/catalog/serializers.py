@@ -4,6 +4,7 @@ from rest_framework import serializers
 from .category_tree import build_categories_index, category_level, category_path
 from .openapi_patch import _NOT_PROVIDED, is_patch_null, pop_patch_value
 from .models import (
+    BlockingReason,
     Category,
     Product,
     ProductCharacteristic,
@@ -222,11 +223,12 @@ class SKUPublicResponseSerializer(serializers.ModelSerializer):
         )
 
 
-class ProductDetailSerializer(serializers.ModelSerializer):
-    category = CategorySerializer(read_only=True)
+class ProductDetailResponseSerializer(serializers.ModelSerializer):
+    """OpenAPI ProductDetailResponse — GET /api/v1/products/{product_id} (seller)."""
+
     category_id = serializers.UUIDField(read_only=True)
     images = ProductImageSerializer(source='image_rows', many=True, read_only=True)
-    characteristics = ProductCharacteristicSerializer(
+    characteristics = CharacteristicResponseSerializer(
         source='characteristic_rows',
         many=True,
         read_only=True,
@@ -243,44 +245,59 @@ class ProductDetailSerializer(serializers.ModelSerializer):
             'seller_id',
             'category_id',
             'title',
+            'slug',
             'description',
             'status',
             'deleted',
-            'blocked',
-            'category',
             'images',
             'characteristics',
             'skus',
-            'blocking_reason',
-            'field_reports',
             'created_at',
             'updated_at',
+            'blocked',
+            'blocking_reason',
+            'field_reports',
         )
 
     def get_blocked(self, obj: Product) -> bool:
         return obj.status in (Product.Status.BLOCKED, Product.Status.HARD_BLOCKED)
 
     def get_blocking_reason(self, obj: Product):
-        # Заглушка до интеграции с Moderation: для BLOCKED возвращаем причину в ожидаемой форме.
-        if obj.status != Product.Status.BLOCKED:
+        if obj.status not in (Product.Status.BLOCKED, Product.Status.HARD_BLOCKED):
+            return None
+        if not obj.blocking_reason_id:
+            return None
+        reason = BlockingReason.objects.filter(id=obj.blocking_reason_id).first()
+        if reason is None:
             return None
         return {
-            "id": "00000000-0000-0000-0000-000000000001",
-            "title": "Blocked by moderation",
-            "comment": "Stub reason until moderation integration is connected",
+            'id': str(reason.id),
+            'title': reason.title,
+            'comment': reason.comment or obj.moderator_comment or '',
         }
 
-    def get_field_reports(self, obj: Product):
-        # Заглушка до интеграции с Moderation.
-        if obj.status != Product.Status.BLOCKED:
+    def get_field_reports(self, obj: Product) -> list:
+        if obj.status not in (Product.Status.BLOCKED, Product.Status.HARD_BLOCKED):
             return []
-        return [
-            {
-                "field_name": "description",
-                "sku_id": None,
-                "comment": "Stub report until moderation integration is connected",
-            }
-        ]
+        reports = obj.field_reports or []
+        normalized = []
+        for item in reports:
+            if not isinstance(item, dict):
+                continue
+            field_name = item.get('field_name') or item.get('field_path')
+            if not field_name:
+                continue
+            sku_id = item.get('sku_id')
+            normalized.append({
+                'field_name': str(field_name),
+                'sku_id': str(sku_id) if sku_id else None,
+                'comment': str(item.get('comment') or item.get('message') or ''),
+            })
+        return normalized
+
+
+# Backward-compatible alias
+ProductDetailSerializer = ProductDetailResponseSerializer
 
 
 class ProductResponseSerializer(serializers.ModelSerializer):
