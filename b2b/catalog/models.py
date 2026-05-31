@@ -33,6 +33,20 @@ class Category(models.Model):
             raise ValidationError({'parent': 'Категория не может быть родителем самой себя.'})
 
 
+class BlockingReason(models.Model):
+    """Причина блокировки (данные от Moderation → B2B)."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    title = models.CharField(max_length=200)
+    comment = models.TextField(blank=True, default='')
+
+    class Meta:
+        ordering = ['title']
+
+    def __str__(self) -> str:
+        return self.title
+
+
 class Product(models.Model):
     class Status(models.TextChoices):
         CREATED = 'CREATED', 'Created'
@@ -48,6 +62,7 @@ class Product(models.Model):
     description = models.TextField(blank=True)
     blocking_reason_id = models.UUIDField(null=True, blank=True)
     moderator_comment = models.TextField(blank=True, default="")
+    field_reports = models.JSONField(default=list, blank=True)
     status = models.CharField(
         max_length=32,
         choices=Status.choices,

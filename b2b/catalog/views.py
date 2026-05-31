@@ -28,6 +28,7 @@ from .serializers import (
     CategoryWithChildrenResponseSerializer,
     ProductMyListItemSerializer,
     ProductCreateSerializer,
+    ProductDetailResponseSerializer,
     ProductResponseSerializer,
     ProductPublicResponseSerializer,
     ProductShortResponseSerializer,
@@ -328,7 +329,7 @@ class ProductRetrieveUpdateAPIView(generics.RetrieveUpdateAPIView):
         )
         if is_owner:
             return Response(
-                ProductResponseSerializer(product).data,
+                ProductDetailResponseSerializer(product).data,
                 status=status.HTTP_200_OK,
             )
         return Response(
