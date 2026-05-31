@@ -27,9 +27,34 @@ services:
       POSTGRES_HOST: db
       POSTGRES_PORT: "5432"
       B2C_TO_B2B_KEY: dev-b2c-key
+      MODERATION_BASE_URL: http://moderation:8002
+      B2B_TO_MODERATION_KEY: dev-b2b-moderation-key
+      MODERATION_TO_B2B_KEY: dev-moderation-b2b-key
       # Показывать в каталоге B2C товары до MODERATED (локально; на проде отключить).
       CATALOG_DEV_VISIBILITY: "1"
       DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1,b2b
+    depends_on:
+      db:
+        condition: service_healthy
+      moderation:
+        condition: service_started
+
+  moderation:
+    build:
+      context: ./moderation
+      dockerfile: Dockerfile
+    ports:
+      - "8002:8002"
+    environment:
+      POSTGRES_DB: moderation
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      B2B_TO_MODERATION_KEY: dev-b2b-moderation-key
+      MODERATION_TO_B2B_KEY: dev-moderation-b2b-key
+      B2B_BASE_URL: http://b2b:8001
+      DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1,moderation
     depends_on:
       db:
         condition: service_healthy
