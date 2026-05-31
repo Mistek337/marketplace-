@@ -210,13 +210,29 @@ class InventoryReservation(models.Model):
         ordering = ['created_at']
 
 
+class ProcessedModerationEvent(models.Model):
+    """Идемпотентность POST /api/v1/moderation/events: (sender_service, idempotency_key), TTL 24ч."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    sender_service = models.CharField(max_length=64, db_index=True)
+    idempotency_key = models.UUIDField(db_index=True)
+    event_type = models.CharField(max_length=16)
+    product_id = models.UUIDField(db_index=True)
+    occurred_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['created_at']
+        unique_together = [('sender_service', 'idempotency_key')]
+
+
 class B2COutboxEvent(models.Model):
-    """Outbox событий B2B → B2C (SKU_OUT_OF_STOCK и др.)."""
+    """Outbox событий B2B → B2C (SKU_OUT_OF_STOCK, PRODUCT_BLOCKED и др.)."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     idempotency_key = models.UUIDField(unique=True, db_index=True)
     event = models.CharField(max_length=32)
-    sku_id = models.UUIDField(db_index=True)
+    sku_id = models.UUIDField(null=True, blank=True, db_index=True)
     product_id = models.UUIDField(db_index=True)
     payload = models.JSONField()
     created_at = models.DateTimeField(auto_now_add=True)

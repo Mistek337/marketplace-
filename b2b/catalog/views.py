@@ -382,6 +382,36 @@ class ProductRetrieveUpdateAPIView(generics.RetrieveUpdateAPIView):
             status=status.HTTP_200_OK,
         )
 
+    def delete(self, request, *args, **kwargs):
+        if not request.user or not getattr(request.user, "is_authenticated", False):
+            return _product_not_found_response()
+
+        try:
+            product_id = UUID(str(kwargs.get("pk", "")))
+        except (TypeError, ValueError):
+            return _product_not_found_response()
+
+        product = self.get_queryset().filter(id=product_id).first()
+        if product is None:
+            return _product_not_found_response()
+
+        seller_id = getattr(request.user, "id", None)
+        if product.seller_id != seller_id:
+            return _product_not_owner_response()
+
+        if product.status == Product.Status.HARD_BLOCKED:
+            return Response(
+                error_body(code=FORBIDDEN, message="Product is hard-blocked"),
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        with transaction.atomic():
+            product = Product.objects.select_for_update().get(pk=product.pk)
+            product.deleted = True
+            product.save(update_fields=["deleted", "updated_at"])
+
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
 
 class SKUCreateAPIView(generics.CreateAPIView):
     """POST /api/v1/skus/ — OpenAPI createSku."""
