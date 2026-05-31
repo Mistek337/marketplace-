@@ -6,5 +6,6 @@
 |--------|------------|
 | `marketplace/` | B2C витрина (Django), прокси к B2B |
 | `b2b/` | B2B каталог и API продавца (Django) |
+| `moderation/` | Модерация товаров (Django) |
 
 

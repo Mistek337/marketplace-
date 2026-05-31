@@ -1,0 +1,23 @@
+# Сборка без PyPI: копирует site-packages из образа b2b (сначала: docker compose build b2b).
+# Имя образа по умолчанию для compose-проекта neomarket — neomarket-b2b.
+ARG B2B_IMAGE=neomarket-b2b:latest
+
+FROM ${B2B_IMAGE} AS b2b_deps
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libpq-dev gcc gunicorn \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=b2b_deps /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+
+COPY . .
+
+EXPOSE 8002
+
+CMD ["sh", "-c", "python manage.py migrate --noinput && exec gunicorn moderation.wsgi:application --bind 0.0.0.0:8002 --workers 2"]

@@ -12,3 +12,5 @@ __pycache__/
 .DS_Store
 htmlcov/
 .coverage
+moderation/docker/wheels/*.whl
+moderation/docker/wheels/*.tar.gz
