@@ -45,6 +45,22 @@ def _order_number(order_id: UUID) -> str:
     return f"NM-{year}-{suffix}"
 
 
+def _iso_z(dt) -> str:
+    return dt.isoformat().replace("+00:00", "Z")
+
+
+def _append_status_history(order: Order, *, status: str, reason: str | None = None) -> None:
+    history = list(order.status_history or [])
+    history.append(
+        {
+            "status": status,
+            "changed_at": _iso_z(timezone.now()),
+            "reason": reason,
+        }
+    )
+    order.status_history = history
+
+
 def _address_snapshot(address: Address) -> dict:
     return {
         "id": str(address.id),
@@ -229,11 +245,19 @@ def checkout_order(
                 )
             return duplicate, False
 
+        paid_history = [
+            {
+                "status": Order.Status.PAID,
+                "changed_at": _iso_z(now),
+                "reason": None,
+            }
+        ]
         order = Order.objects.create(
             id=order_id,
             buyer=buyer,
             number=_order_number(order_id),
             status=Order.Status.PAID,
+            status_history=paid_history,
             idempotency_key=idempotency_key,
             request_hash=request_hash,
             address_snapshot=_address_snapshot(address),
@@ -333,7 +357,8 @@ def _finalize_cancelled(order_id: UUID, *, cancel_reason: str) -> Order:
         order = Order.objects.select_for_update().prefetch_related("items").get(pk=order_id)
         order.status = Order.Status.CANCELLED
         order.cancel_reason = cancel_reason
-        order.save(update_fields=["status", "cancel_reason"])
+        _append_status_history(order, status=Order.Status.CANCELLED, reason=cancel_reason or None)
+        order.save(update_fields=["status", "cancel_reason", "status_history"])
     return order
 
 
@@ -373,7 +398,12 @@ def cancel_order(*, buyer, order_id: UUID, reason: str = "") -> Order:
         order = Order.objects.select_for_update().prefetch_related("items").get(pk=order.pk)
         order.status = Order.Status.CANCEL_PENDING
         order.cancel_reason = cancel_reason
-        order.save(update_fields=["status", "cancel_reason"])
+        _append_status_history(
+            order,
+            status=Order.Status.CANCEL_PENDING,
+            reason=cancel_reason or None,
+        )
+        order.save(update_fields=["status", "cancel_reason", "status_history"])
 
     if _call_b2b_unreserve(order):
         return _finalize_cancelled(order.id, cancel_reason=cancel_reason)

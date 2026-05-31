@@ -6,8 +6,7 @@ from rest_framework.views import APIView
 
 from .api_errors import error_body, service_unavailable
 from .responses import order_to_response
-from .serializers import OrderCreateRequestSerializer
-from .serializers import OrderCancelRequestSerializer
+from .serializers import OrderCancelRequestSerializer, OrderCreateRequestSerializer
 from .services import CancelError, CheckoutError, cancel_order, checkout_order
 
 

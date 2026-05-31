@@ -79,6 +79,7 @@ class Order(models.Model):
     total = models.PositiveBigIntegerField()
     comment = models.TextField(blank=True, default="")
     cancel_reason = models.CharField(max_length=500, blank=True, default="")
+    status_history = models.JSONField(default=list, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     paid_at = models.DateTimeField(null=True, blank=True)
 

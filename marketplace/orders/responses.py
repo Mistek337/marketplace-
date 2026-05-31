@@ -27,6 +27,7 @@ def order_to_response(order: Order) -> dict:
         "number": order.number,
         "buyer_id": str(order.buyer_id),
         "status": order.status,
+        "status_history": order.status_history or [],
         "items": items,
         "subtotal": order.subtotal,
         "delivery_cost": order.delivery_cost,
