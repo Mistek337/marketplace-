@@ -11,3 +11,4 @@ DATABASES = {
 
 B2B_BASE_URL = 'https://b2b.example'
 MODERATION_TO_B2B_KEY = 'test-mod-b2b-key'
+B2B_TO_MODERATION_KEY = 'test-b2b-mod-key'
