@@ -211,16 +211,19 @@ class InventoryReservation(models.Model):
 
 
 class ProcessedModerationEvent(models.Model):
-    """Идемпотентность POST /api/v1/moderation/events (TTL 24ч — очистка вне scope)."""
+    """Идемпотентность POST /api/v1/moderation/events: (sender_service, idempotency_key), TTL 24ч."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    idempotency_key = models.UUIDField(unique=True, db_index=True)
+    sender_service = models.CharField(max_length=64, db_index=True)
+    idempotency_key = models.UUIDField(db_index=True)
     event_type = models.CharField(max_length=16)
     product_id = models.UUIDField(db_index=True)
+    occurred_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ['created_at']
+        unique_together = [('sender_service', 'idempotency_key')]
 
 
 class B2COutboxEvent(models.Model):

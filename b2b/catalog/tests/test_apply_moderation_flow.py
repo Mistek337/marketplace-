@@ -81,7 +81,12 @@ class ApplyModerationFlowTests(TestCase):
         self.product.refresh_from_db()
         self.assertEqual(self.product.status, Product.Status.MODERATED)
         self.assertIsNone(self.product.blocking_reason_id)
+        self.assertEqual(self.product.moderator_comment, "")
         self.assertEqual(self.product.field_reports, [])
+
+        processed = ProcessedModerationEvent.objects.get()
+        self.assertEqual(processed.sender_service, "moderation")
+        self.assertEqual(str(processed.idempotency_key), payload["idempotency_key"])
 
     @override_settings(
         MODERATION_TO_B2B_KEY="mod-to-b2b-key",
@@ -228,6 +233,40 @@ class ApplyModerationFlowTests(TestCase):
 
         resp = self.client.post(self.moderation_url, payload, format="json")
         self.assertEqual(resp.status_code, 401)
+
+    @override_settings(MODERATION_TO_B2B_KEY="mod-to-b2b-key")
+    def test_unknown_product_returns_400_not_retryable(self):
+        payload = self._event_payload(
+            product_id=str(uuid.uuid4()),
+            event_type="MODERATED",
+        )
+
+        resp = self.client.post(
+            self.moderation_url,
+            payload,
+            format="json",
+            **self._headers(),
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.json()["code"], "VALIDATION_ERROR")
+        self.assertEqual(ProcessedModerationEvent.objects.count(), 0)
+
+    @override_settings(MODERATION_TO_B2B_KEY="mod-to-b2b-key")
+    def test_unknown_blocking_reason_returns_400(self):
+        payload = self._event_payload(
+            event_type="BLOCKED",
+            blocking_reason_id=str(uuid.uuid4()),
+            field_reports=[],
+        )
+
+        resp = self.client.post(
+            self.moderation_url,
+            payload,
+            format="json",
+            **self._headers(),
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.json()["code"], "VALIDATION_ERROR")
 
     @override_settings(MODERATION_TO_B2B_KEY="mod-to-b2b-key")
     def test_blocked_without_active_stock_skips_b2c_cascade(self):
