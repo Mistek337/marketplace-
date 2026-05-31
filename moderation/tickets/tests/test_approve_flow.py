@@ -3,30 +3,14 @@ import uuid
 from unittest.mock import patch
 
 import pytest
-from django.test import Client
 
-from tickets.models import B2BOutboxEvent, Moderator, Ticket
-
-
-@pytest.fixture
-def api_client():
-    return Client()
-
-
-@pytest.fixture
-def moderators(db):
-    mod_a = Moderator.objects.create(email='mod-a@example.com')
-    mod_b = Moderator.objects.create(email='mod-b@example.com')
-    return mod_a, mod_b
-
-
-def _auth_headers(moderator: Moderator) -> dict:
-    return {'HTTP_X_MODERATOR_ID': str(moderator.id)}
+from tickets.models import B2BOutboxEvent, Ticket
+from tickets.tests.conftest import bearer_headers
 
 
 def _create_ticket(
     *,
-    moderator: Moderator,
+    moderator,
     product_revision: int = 1,
     claimed_revision: int = 1,
     with_sku: bool = True,
@@ -46,7 +30,7 @@ def _create_ticket(
 
 
 @pytest.mark.django_db
-@patch('tickets.services.deliver_moderated_payload', return_value=True)
+@patch('tickets.services.deliver_b2b_payload', return_value=True)
 def test_approve_transitions_to_moderated_and_emits_event(
     deliver_mock,
     api_client,
@@ -59,7 +43,7 @@ def test_approve_transitions_to_moderated_and_emits_event(
         f'/api/v1/tickets/{ticket.id}/approve/',
         data=json.dumps({'comment': 'ok'}),
         content_type='application/json',
-        **_auth_headers(moderator),
+        **bearer_headers(moderator),
     )
 
     assert response.status_code == 200
@@ -80,18 +64,18 @@ def test_approve_transitions_to_moderated_and_emits_event(
 
 
 @pytest.mark.django_db
-def test_approve_others_card_returns_403(api_client, moderators):
+def test_approve_others_card_returns_409(api_client, moderators):
     owner, other = moderators
     ticket = _create_ticket(moderator=owner)
 
     response = api_client.post(
         f'/api/v1/tickets/{ticket.id}/approve/',
-        **_auth_headers(other),
+        **bearer_headers(other),
     )
 
-    assert response.status_code == 403
+    assert response.status_code == 409
     body = response.json()
-    assert body['code'] == 'TICKET_NOT_ASSIGNED'
+    assert body['code'] == 'TICKET_WRONG_STATUS'
     ticket.refresh_from_db()
     assert ticket.status == Ticket.Status.IN_REVIEW
 
@@ -103,7 +87,7 @@ def test_approve_after_edited_returns_409(api_client, moderators):
 
     response = api_client.post(
         f'/api/v1/tickets/{ticket.id}/approve/',
-        **_auth_headers(moderator),
+        **bearer_headers(moderator),
     )
 
     assert response.status_code == 409
@@ -120,7 +104,7 @@ def test_approve_without_sku_returns_409(api_client, moderators):
 
     response = api_client.post(
         f'/api/v1/tickets/{ticket.id}/approve/',
-        **_auth_headers(moderator),
+        **bearer_headers(moderator),
     )
 
     assert response.status_code == 409

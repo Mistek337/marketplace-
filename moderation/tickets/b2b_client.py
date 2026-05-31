@@ -8,7 +8,7 @@ from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
-MODERATED_NAMESPACE = uuid.UUID('6ba7b810-9dad-11d1-80b4-00c04fd430c8')
+EVENT_NAMESPACE = uuid.UUID('6ba7b810-9dad-11d1-80b4-00c04fd430c8')
 
 
 class B2BClientError(Exception):
@@ -16,7 +16,11 @@ class B2BClientError(Exception):
 
 
 def moderated_idempotency_key(ticket_id: uuid.UUID) -> uuid.UUID:
-    return uuid.uuid5(MODERATED_NAMESPACE, f'ticket-approve:{ticket_id}')
+    return uuid.uuid5(EVENT_NAMESPACE, f'ticket-approve:{ticket_id}')
+
+
+def blocked_idempotency_key(ticket_id: uuid.UUID) -> uuid.UUID:
+    return uuid.uuid5(EVENT_NAMESPACE, f'ticket-block:{ticket_id}')
 
 
 def build_moderated_payload(*, ticket_id: uuid.UUID, product_id: uuid.UUID, seller_id: uuid.UUID) -> dict:
@@ -26,11 +30,39 @@ def build_moderated_payload(*, ticket_id: uuid.UUID, product_id: uuid.UUID, sell
         'product_id': str(product_id),
         'seller_id': str(seller_id),
         'event': 'MODERATED',
-        'date': datetime.now(timezone.utc).isoformat(timespec='milliseconds').replace('+00:00', 'Z'),
+        'date': _now_iso(),
     }
 
 
-def deliver_moderated_payload(payload: dict) -> bool:
+def build_blocked_payload(
+    *,
+    ticket_id: uuid.UUID,
+    product_id: uuid.UUID,
+    seller_id: uuid.UUID,
+    hard_block: bool,
+    blocking_reason_ids: list[uuid.UUID],
+    comment: str = '',
+) -> dict:
+    idempotency_key = blocked_idempotency_key(ticket_id)
+    payload = {
+        'idempotency_key': str(idempotency_key),
+        'product_id': str(product_id),
+        'seller_id': str(seller_id),
+        'event': 'BLOCKED',
+        'hard_block': hard_block,
+        'blocking_reason_ids': [str(rid) for rid in blocking_reason_ids],
+        'date': _now_iso(),
+    }
+    if comment:
+        payload['comment'] = comment
+    return payload
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec='milliseconds').replace('+00:00', 'Z')
+
+
+def deliver_b2b_payload(payload: dict) -> bool:
     base_url = (getattr(settings, 'B2B_BASE_URL', '') or '').rstrip('/')
     if not base_url:
         return False
@@ -46,11 +78,16 @@ def deliver_moderated_payload(payload: dict) -> bool:
         req.add_header('X-Service-Key', service_key)
 
     timeout = float(getattr(settings, 'B2B_TIMEOUT', 5))
+    event = payload.get('event', '?')
     try:
         with request.urlopen(req, timeout=timeout):
             return True
     except error.URLError as exc:
-        logger.warning('B2B unavailable (MODERATED): %s', exc)
+        logger.warning('B2B unavailable (%s): %s', event, exc)
     except error.HTTPError as exc:
-        logger.warning('B2B HTTP error %s (MODERATED)', exc.code)
+        logger.warning('B2B HTTP error %s (%s)', exc.code, event)
     return False
+
+
+def deliver_moderated_payload(payload: dict) -> bool:
+    return deliver_b2b_payload(payload)
