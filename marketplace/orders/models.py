@@ -78,6 +78,7 @@ class Order(models.Model):
     delivery_cost = models.PositiveBigIntegerField(default=0)
     total = models.PositiveBigIntegerField()
     comment = models.TextField(blank=True, default="")
+    cancel_reason = models.CharField(max_length=500, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     paid_at = models.DateTimeField(null=True, blank=True)
 

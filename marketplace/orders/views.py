@@ -7,7 +7,8 @@ from rest_framework.views import APIView
 from .api_errors import error_body, service_unavailable
 from .responses import order_to_response
 from .serializers import OrderCreateRequestSerializer
-from .services import CheckoutError, checkout_order
+from .serializers import OrderCancelRequestSerializer
+from .services import CancelError, CheckoutError, cancel_order, checkout_order
 
 
 def _parse_idempotency_key(request) -> UUID | None:
@@ -69,3 +70,43 @@ class OrderCreateAPIView(APIView):
 
         response_status = status.HTTP_201_CREATED if created else status.HTTP_200_OK
         return Response(order_to_response(order), status=response_status)
+
+
+class OrderCancelAPIView(APIView):
+    """POST /api/v1/orders/{order_id}/cancel — OpenAPI cancel order."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, order_id):
+        serializer = OrderCancelRequestSerializer(data=request.data or {})
+        if not serializer.is_valid():
+            return Response(
+                error_body(
+                    code="VALIDATION_ERROR",
+                    message="Invalid cancel request",
+                    details=serializer.errors,
+                ),
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            order_uuid = UUID(str(order_id))
+        except (TypeError, ValueError):
+            return Response(
+                error_body(code="NOT_FOUND", message="Order not found"),
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        try:
+            order = cancel_order(
+                buyer=request.user,
+                order_id=order_uuid,
+                reason=serializer.validated_data.get("reason") or "",
+            )
+        except CancelError as exc:
+            return Response(
+                error_body(code=exc.code, message=exc.message, details=exc.details),
+                status=exc.status_code,
+            )
+
+        return Response(order_to_response(order), status=status.HTTP_200_OK)

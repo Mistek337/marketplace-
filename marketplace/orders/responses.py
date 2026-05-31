@@ -34,7 +34,7 @@ def order_to_response(order: Order) -> dict:
         "address": order.address_snapshot,
         "payment_method": order.payment_method_snapshot,
         "comment": order.comment or None,
-        "cancel_reason": None,
+        "cancel_reason": order.cancel_reason or None,
         "created_at": order.created_at.isoformat().replace("+00:00", "Z"),
         "paid_at": order.paid_at.isoformat().replace("+00:00", "Z") if order.paid_at else None,
         "delivered_at": None,
