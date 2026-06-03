@@ -201,7 +201,7 @@ class B2COutboxEvent(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     idempotency_key = models.UUIDField(unique=True, db_index=True)
     event = models.CharField(max_length=32)
-    sku_id = models.UUIDField(db_index=True)
+    sku_id = models.UUIDField(null=True, blank=True, db_index=True)
     product_id = models.UUIDField(db_index=True)
     payload = models.JSONField()
     created_at = models.DateTimeField(auto_now_add=True)
