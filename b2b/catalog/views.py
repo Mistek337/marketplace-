@@ -221,14 +221,10 @@ class ProductListCreateAPIView(generics.ListCreateAPIView):
                 status=status.HTTP_422_UNPROCESSABLE_ENTITY,
             )
 
-        # OpenAPI listMyProducts не описывает search/skus_count — поля из DoD квеста.
-        search = (request.query_params.get("search") or "").strip() or None
-
         qs = seller_product_list_queryset(
             seller_id=request.user.id,
             include_deleted=include_deleted,
             status=status_filter,
-            search=search,
         )
 
         total_count = qs.count()

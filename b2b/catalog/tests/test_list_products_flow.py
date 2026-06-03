@@ -1,12 +1,27 @@
-"""OpenAPI GET /api/v1/products — seller cabinet list (list-products flow)."""
-
-import uuid
+"""OpenAPI GET /api/v1/products — listMyProducts (strict schema)."""
 
 from django.test import TestCase
 from rest_framework.test import APIClient
 
+from catalog.api_errors import UNAUTHORIZED, VALIDATION_ERROR
 from catalog.models import Category, Product, SKU
 from sellers.models import Seller
+
+OPENAPI_PRODUCT_SHORT_FIELDS = frozenset(
+    {
+        "id",
+        "title",
+        "slug",
+        "status",
+        "category_id",
+        "deleted",
+        "created_at",
+        "min_price",
+        "cover_image",
+    }
+)
+
+OPENAPI_PAGINATED_FIELDS = frozenset({"items", "total_count", "limit", "offset"})
 
 
 class ListProductsFlowTests(TestCase):
@@ -58,13 +73,15 @@ class ListProductsFlowTests(TestCase):
         resp = self.client.get(self.url)
         self.assertEqual(resp.status_code, 200)
         body = resp.json()
+        self.assertEqual(set(body.keys()), OPENAPI_PAGINATED_FIELDS)
+
         ids = {item["id"] for item in body["items"]}
         self.assertIn(str(own.id), ids)
         self.assertNotIn(str(other.id), ids)
 
         item = next(i for i in body["items"] if i["id"] == str(own.id))
-        self.assertEqual(item["skus_count"], 1)
-        self.assertEqual(item["total_active_quantity"], 5)
+        self.assertEqual(set(item.keys()), OPENAPI_PRODUCT_SHORT_FIELDS)
+        self.assertEqual(item["min_price"], 10_000)
 
     def test_idor_query_param_seller_id_ignored(self):
         own = self._product(seller_id=self.seller.id, title="Mine")
@@ -119,17 +136,13 @@ class ListProductsFlowTests(TestCase):
         for item in resp.json()["items"]:
             self.assertEqual(item["status"], Product.Status.BLOCKED)
 
-    def test_search_by_title_case_insensitive(self):
-        iphone = self._product(seller_id=self.seller.id, title="iPhone 15 Pro", slug="iphone")
-        galaxy = self._product(seller_id=self.seller.id, title="Galaxy S24", slug="galaxy")
+    def test_invalid_status_returns_422(self):
+        resp = self.client.get(self.url, {"status": "NOT_A_STATUS"})
+        self.assertEqual(resp.status_code, 422)
+        self.assertEqual(resp.json()["code"], VALIDATION_ERROR)
 
-        resp = self.client.get(self.url, {"search": "iphone"})
-        self.assertEqual(resp.status_code, 200)
-        ids = {item["id"] for item in resp.json()["items"]}
-        self.assertIn(str(iphone.id), ids)
-        self.assertNotIn(str(galaxy.id), ids)
-
-        resp_upper = self.client.get(self.url, {"search": "IPHONE"})
-        self.assertEqual(resp_upper.status_code, 200)
-        ids_upper = {item["id"] for item in resp_upper.json()["items"]}
-        self.assertEqual(ids, ids_upper)
+    def test_unauthenticated_returns_401(self):
+        self.client.force_authenticate(user=None)
+        resp = self.client.get(self.url)
+        self.assertEqual(resp.status_code, 401)
+        self.assertEqual(resp.json()["code"], UNAUTHORIZED)
