@@ -12,6 +12,7 @@ from sellers.auth import SellerJWTAuthentication
 from .models import Category, Product, SKU, SKUImage
 from .public_catalog import public_detail_queryset
 from .moderation_client import emit_product_created_event, emit_product_edited_event
+from .product_delete_service import DeleteProductError, delete_product
 from .api_errors import (
     FORBIDDEN,
     NOT_FOUND,
@@ -26,7 +27,6 @@ from .serializers import (
     CategoryResponseSerializer,
     CategoryUpdateSerializer,
     CategoryWithChildrenResponseSerializer,
-    ProductMyListItemSerializer,
     ProductCreateSerializer,
     ProductDetailResponseSerializer,
     ProductResponseSerializer,
@@ -238,36 +238,6 @@ class ProductListCreateAPIView(generics.ListCreateAPIView):
         )
 
 
-class ProductMyListAPIView(generics.ListAPIView):
-    authentication_classes = [SellerJWTAuthentication]
-    permission_classes = [permissions.IsAuthenticated]
-    serializer_class = ProductMyListItemSerializer
-
-    def get_queryset(self):
-        return Product.objects.filter(seller_id=self.request.user.id).order_by("-created_at")
-
-    def list(self, request, *args, **kwargs):
-        try:
-            limit = int(request.query_params.get("limit", 20))
-            offset = int(request.query_params.get("offset", 0))
-        except ValueError:
-            return Response(
-                {"detail": [{"msg": "Invalid pagination parameters"}]},
-                status=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            )
-
-        limit = max(1, limit)
-        offset = max(0, offset)
-
-        qs = self.get_queryset()
-        total = qs.count()
-        items = qs[offset : offset + limit]
-        return Response(
-            {"total": total, "items": ProductMyListItemSerializer(items, many=True).data},
-            status=status.HTTP_200_OK,
-        )
-
-
 class ProductRetrieveUpdateAPIView(generics.RetrieveUpdateAPIView):
     """GET / PATCH /api/v1/products/{id} — OpenAPI seller-view / public-view."""
 
@@ -383,32 +353,26 @@ class ProductRetrieveUpdateAPIView(generics.RetrieveUpdateAPIView):
         )
 
     def delete(self, request, *args, **kwargs):
+        """OpenAPI deleteProduct — soft delete + каскад DELETED / PRODUCT_DELETED."""
         if not request.user or not getattr(request.user, "is_authenticated", False):
-            return _product_not_found_response()
+            return Response(
+                error_body(code=UNAUTHORIZED, message="Authentication required"),
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
 
         try:
             product_id = UUID(str(kwargs.get("pk", "")))
         except (TypeError, ValueError):
             return _product_not_found_response()
 
-        product = self.get_queryset().filter(id=product_id).first()
-        if product is None:
-            return _product_not_found_response()
-
         seller_id = getattr(request.user, "id", None)
-        if product.seller_id != seller_id:
-            return _product_not_owner_response()
-
-        if product.status == Product.Status.HARD_BLOCKED:
+        try:
+            delete_product(seller_id=seller_id, product_id=product_id)
+        except DeleteProductError as exc:
             return Response(
-                error_body(code=FORBIDDEN, message="Product is hard-blocked"),
-                status=status.HTTP_403_FORBIDDEN,
+                error_body(code=exc.code, message=exc.message),
+                status=exc.status_code,
             )
-
-        with transaction.atomic():
-            product = Product.objects.select_for_update().get(pk=product.pk)
-            product.deleted = True
-            product.save(update_fields=["deleted", "updated_at"])
 
         return Response(status=status.HTTP_204_NO_CONTENT)
 

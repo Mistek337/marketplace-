@@ -16,7 +16,6 @@ from .moderation_events_views import ReceiveModerationEventAPIView
 from .views import (
     CategoryDetailAPIView,
     CategoryListAPIView,
-    ProductMyListAPIView,
     ProductListCreateAPIView,
     ProductRetrieveUpdateAPIView,
     SKUCreateAPIView,
@@ -72,8 +71,6 @@ urlpatterns = [
     ),
     path('products/', ProductListCreateAPIView.as_view(), name='product-list-create'),
     path('products', ProductListCreateAPIView.as_view(), name='product-list-create-no-slash'),
-    path('products/my', ProductMyListAPIView.as_view(), name='product-my-list-no-slash'),
-    path('products/my/', ProductMyListAPIView.as_view(), name='product-my-list'),
     # str:pk нужен для явной 400-валидации невалидного UUID в GET /products/{id}.
     path('products/<str:pk>/', ProductRetrieveUpdateAPIView.as_view(), name='product-detail'),
     path('products/<str:pk>', ProductRetrieveUpdateAPIView.as_view(), name='product-detail-no-slash'),
