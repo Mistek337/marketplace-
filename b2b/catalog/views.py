@@ -213,6 +213,15 @@ class ProductListCreateAPIView(generics.ListCreateAPIView):
             request.query_params.get("include_deleted", "false")
         ).lower() in ("1", "true", "yes")
         status_filter = request.query_params.get("status")
+        if status_filter and status_filter not in Product.Status.values:
+            return Response(
+                drf_validation_error(
+                    {"status": f"Must be one of: {', '.join(Product.Status.values)}"},
+                ),
+                status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            )
+
+        # OpenAPI listMyProducts не описывает search/skus_count — поля из DoD квеста.
         search = (request.query_params.get("search") or "").strip() or None
 
         qs = seller_product_list_queryset(

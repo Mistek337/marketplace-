@@ -619,7 +619,7 @@ class SKUUpdateSerializer(serializers.Serializer):
 
 
 class ProductShortResponseSerializer(serializers.ModelSerializer):
-    """OpenAPI ProductShortResponse + skus_count / total_active_quantity (seller cabinet)."""
+    """OpenAPI ProductShortResponse (+ skus_count / total_active_quantity по DoD квеста)."""
 
     category_id = serializers.UUIDField(read_only=True)
     min_price = serializers.SerializerMethodField()
