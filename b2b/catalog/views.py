@@ -12,6 +12,7 @@ from .models import Category, Product, SKU, SKUImage
 from .public_catalog import public_detail_queryset
 from .moderation_client import emit_product_created_event, emit_product_edited_event
 from .product_delete_service import DeleteProductError, delete_product
+from .sku_delete_service import DeleteSKUError, delete_sku
 from .api_errors import (
     FORBIDDEN,
     NOT_FOUND,
@@ -469,7 +470,7 @@ class SKUCreateAPIView(generics.CreateAPIView):
 
 
 class SKURetrieveUpdateAPIView(generics.RetrieveUpdateAPIView):
-    """GET / PATCH /api/v1/skus/{id} — OpenAPI getSku / updateSku."""
+    """GET / PATCH / DELETE /api/v1/skus/{id} — OpenAPI getSku / updateSku / deleteSku."""
 
     authentication_classes = [SellerJWTAuthentication]
     permission_classes = [permissions.IsAuthenticated]
@@ -541,3 +542,20 @@ class SKURetrieveUpdateAPIView(generics.RetrieveUpdateAPIView):
             SKUResponseSerializer(sku).data,
             status=status.HTTP_200_OK,
         )
+
+    def delete(self, request, *args, **kwargs):
+        """OpenAPI deleteSku — 204 / 409."""
+        try:
+            sku = self.get_object()
+        except Http404:
+            return Response(status=status.HTTP_204_NO_CONTENT)
+
+        try:
+            delete_sku(sku_id=sku.id)
+        except DeleteSKUError as exc:
+            return Response(
+                error_body(code=exc.code, message=exc.message),
+                status=exc.status_code,
+            )
+
+        return Response(status=status.HTTP_204_NO_CONTENT)
