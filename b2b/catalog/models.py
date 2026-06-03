@@ -204,6 +204,7 @@ class InventoryReservation(models.Model):
     response_payload = models.JSONField()
     reserved_at = models.DateTimeField()
     unreserved_at = models.DateTimeField(null=True, blank=True)
+    fulfilled_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
