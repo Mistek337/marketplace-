@@ -619,11 +619,13 @@ class SKUUpdateSerializer(serializers.Serializer):
 
 
 class ProductShortResponseSerializer(serializers.ModelSerializer):
-    """OpenAPI ProductShortResponse — GET /api/v1/products (seller list)."""
+    """OpenAPI ProductShortResponse + skus_count / total_active_quantity (seller cabinet)."""
 
     category_id = serializers.UUIDField(read_only=True)
     min_price = serializers.SerializerMethodField()
     cover_image = serializers.SerializerMethodField()
+    skus_count = serializers.SerializerMethodField()
+    total_active_quantity = serializers.SerializerMethodField()
 
     class Meta:
         model = Product
@@ -637,7 +639,21 @@ class ProductShortResponseSerializer(serializers.ModelSerializer):
             "created_at",
             "min_price",
             "cover_image",
+            "skus_count",
+            "total_active_quantity",
         )
+
+    def get_skus_count(self, obj: Product) -> int:
+        annotated = getattr(obj, "skus_count", None)
+        if annotated is not None:
+            return int(annotated)
+        return obj.skus.count()
+
+    def get_total_active_quantity(self, obj: Product) -> int:
+        annotated = getattr(obj, "total_active_quantity", None)
+        if annotated is not None:
+            return int(annotated)
+        return sum(int(s.active_quantity) for s in obj.skus.all())
 
     def get_min_price(self, obj: Product) -> int | None:
         annotated = getattr(obj, "min_price", None)
