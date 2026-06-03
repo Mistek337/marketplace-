@@ -73,8 +73,14 @@ def test_hard_block_transitions_to_terminal_and_emits_event(
 
     deliver_mock.assert_called_once()
     payload = deliver_mock.call_args.args[0]
-    assert payload['event'] == 'BLOCKED'
+    assert payload['event_type'] == 'BLOCKED'
+    assert payload['occurred_at']
     assert payload['hard_block'] is True
+    assert payload['blocking_reason_id'] == str(hard_reason.id)
+    assert len(payload['field_reports']) == 1
+    assert payload['field_reports'][0]['field_name'] == 'images[0].url'
+    assert payload['field_reports'][0]['comment'] == 'counterfeit logo'
+    assert payload['moderator_comment'] == 'counterfeit'
 
 
 @pytest.mark.django_db
@@ -95,8 +101,9 @@ def test_hard_block_event_carries_hard_block_true(
     )
 
     payload = deliver_mock.call_args.args[0]
+    assert payload['event_type'] == 'BLOCKED'
     assert payload['hard_block'] is True
-    assert str(hard_reason.id) in payload['blocking_reason_ids']
+    assert payload['blocking_reason_id'] == str(hard_reason.id)
 
 
 @pytest.mark.django_db
