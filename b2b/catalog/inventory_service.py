@@ -64,6 +64,14 @@ def _unreserve_response(*, order_id: UUID, processed_at) -> dict[str, Any]:
     }
 
 
+def _fulfill_response(*, order_id: UUID, processed_at) -> dict[str, Any]:
+    return {
+        "order_id": str(order_id),
+        "status": "FULFILLED",
+        "processed_at": _iso_z(processed_at),
+    }
+
+
 def _find_active_reservation_by_idempotency(idempotency_key: UUID) -> InventoryReservation | None:
     cutoff = django_tz.now() - RESERVE_IDEMPOTENCY_TTL
     return (
@@ -253,6 +261,87 @@ def unreserve_inventory(*, order_id: UUID) -> dict[str, Any]:
         reservation.save(update_fields=["unreserved_at"])
 
     return _unreserve_response(order_id=order_id, processed_at=processed_at)
+
+
+def fulfill_inventory(*, order_id: UUID, items: list[InventoryItemInput]) -> dict[str, Any]:
+    """
+    Списание резерва при доставке (OpenAPI fulfillInventory).
+    active_quantity не меняется; reserved_quantity уменьшается.
+    Идемпотентно по order_id через InventoryReservation.fulfilled_at.
+    """
+    aggregated = _aggregate_items(items)
+    if not aggregated:
+        raise InventoryConflict(
+            message="Fulfill items are required",
+            details={"items": "At least one item is required"},
+        )
+
+    processed_at = django_tz.now()
+
+    with transaction.atomic():
+        reservation = (
+            InventoryReservation.objects.select_for_update()
+            .filter(order_id=order_id)
+            .first()
+        )
+        if reservation is None:
+            raise InventoryNotFound(message="Reservation for order not found")
+
+        if reservation.unreserved_at is not None:
+            raise InventoryConflict(
+                message="Order reservation was already unreserved",
+                details={"order_id": str(order_id)},
+            )
+
+        if reservation.fulfilled_at is not None:
+            return _fulfill_response(order_id=order_id, processed_at=reservation.fulfilled_at)
+
+        reserved_items = [
+            InventoryItemInput(sku_id=UUID(row["sku_id"]), quantity=int(row["quantity"]))
+            for row in reservation.items
+        ]
+        reserved_by_sku = {row.sku_id: row.quantity for row in _aggregate_items(reserved_items)}
+        for row in aggregated:
+            expected = reserved_by_sku.get(row.sku_id)
+            if expected is None or expected != row.quantity:
+                raise InventoryConflict(
+                    message="Fulfill items do not match reservation",
+                    details={
+                        "sku_id": str(row.sku_id),
+                        "expected": expected,
+                        "requested": row.quantity,
+                    },
+                )
+
+        sku_ids = sorted({row.sku_id for row in aggregated}, key=str)
+        skus = list(SKU.objects.select_for_update().filter(id__in=sku_ids))
+        skus_by_id = {sku.id: sku for sku in skus}
+
+        for row in aggregated:
+            sku = skus_by_id.get(row.sku_id)
+            if sku is None:
+                raise InventoryNotFound(message=f"SKU {row.sku_id} not found for fulfill")
+            if sku.reserved_quantity < row.quantity:
+                raise InventoryConflict(
+                    message="Reserved quantity is lower than requested fulfill",
+                    details={
+                        "sku_id": str(row.sku_id),
+                        "requested": row.quantity,
+                        "reserved": sku.reserved_quantity,
+                    },
+                )
+
+        for row in aggregated:
+            sku = skus_by_id[row.sku_id]
+            SKU.objects.filter(pk=sku.pk).update(
+                reserved_quantity=F("reserved_quantity") - row.quantity,
+                updated_at=django_tz.now(),
+            )
+
+        reservation.fulfilled_at = processed_at
+        reservation.save(update_fields=["fulfilled_at"])
+
+    return _fulfill_response(order_id=order_id, processed_at=processed_at)
 
 
 def conflict_error_response(exc: InventoryConflict):

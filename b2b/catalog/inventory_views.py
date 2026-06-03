@@ -13,6 +13,7 @@ from .inventory_service import (
     InventoryItemInput,
     InventoryNotFound,
     conflict_error_response,
+    fulfill_inventory,
     not_found_error_response,
     notify_out_of_stock,
     reserve_inventory,
@@ -74,6 +75,37 @@ class UnreserveInventoryAPIView(APIView):
 
         try:
             response_body = unreserve_inventory(order_id=data["order_id"])
+        except InventoryNotFound as exc:
+            return not_found_error_response(exc)
+        except InventoryConflict as exc:
+            return conflict_error_response(exc)
+
+        return Response(response_body, status=status.HTTP_200_OK)
+
+
+class FulfillInventoryAPIView(APIView):
+    """OpenAPI fulfillInventory — списание резерва при доставке, идемпотентно по order_id."""
+
+    def post(self, request, *args, **kwargs):
+        denied = require_b2c_service_key(request)
+        if denied is not None:
+            return denied
+
+        serializer = InventoryOrderRequestSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(
+                drf_validation_error(serializer.errors),
+                status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            )
+
+        data = serializer.validated_data
+        items = [
+            InventoryItemInput(sku_id=row["sku_id"], quantity=row["quantity"])
+            for row in data["items"]
+        ]
+
+        try:
+            response_body = fulfill_inventory(order_id=data["order_id"], items=items)
         except InventoryNotFound as exc:
             return not_found_error_response(exc)
         except InventoryConflict as exc:
