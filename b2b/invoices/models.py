@@ -1,49 +1,56 @@
+import uuid
+
 from django.db import models
 
 
 class Invoice(models.Model):
-    """
-    Приходная накладная: до приёмки остатки SKU не меняются.
-    """
+    """Приходная накладная (OpenAPI InvoiceResponse)."""
 
     class Status(models.TextChoices):
-        CREATED = 'CREATED', 'Created'
-        ACCEPTED = 'ACCEPTED', 'Accepted'
-        CANCELLED = 'CANCELLED', 'Cancelled'
+        CREATED = "CREATED", "Created"
+        PARTIALLY_ACCEPTED = "PARTIALLY_ACCEPTED", "Partially accepted"
+        ACCEPTED = "ACCEPTED", "Accepted"
+        CANCELLED = "CANCELLED", "Cancelled"
 
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    seller_id = models.UUIDField(db_index=True)
     status = models.CharField(
-        max_length=16,
+        max_length=32,
         choices=Status.choices,
         default=Status.CREATED,
     )
-    note = models.CharField(max_length=1024, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    accepted_at = models.DateTimeField(null=True, blank=True)
+    accepted_by = models.UUIDField(null=True, blank=True)
 
     class Meta:
-        ordering = ['-id']
+        ordering = ["-created_at"]
 
     def __str__(self) -> str:
-        return f'Invoice #{self.pk} ({self.status})'
+        return f"Invoice {self.id} ({self.status})"
 
 
-class InvoiceLine(models.Model):
+class InvoiceItem(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     invoice = models.ForeignKey(
         Invoice,
         on_delete=models.CASCADE,
-        related_name='lines',
+        related_name="items",
     )
     sku = models.ForeignKey(
-        'catalog.SKU',
+        "catalog.SKU",
         on_delete=models.PROTECT,
-        related_name='invoice_lines',
+        related_name="invoice_items",
     )
     quantity = models.PositiveIntegerField()
+    accepted_quantity = models.PositiveIntegerField(default=0)
 
     class Meta:
-        ordering = ['id']
+        ordering = ["id"]
         constraints = [
             models.UniqueConstraint(
-                fields=('invoice', 'sku'),
-                name='uniq_invoice_sku_line',
+                fields=("invoice", "sku"),
+                name="uniq_invoice_sku_item",
             ),
         ]

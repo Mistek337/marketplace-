@@ -1,23 +1,60 @@
-from rest_framework import generics, status
+from rest_framework import generics, permissions, status
 from rest_framework.response import Response
-from rest_framework.views import APIView
 
-from .models import Invoice
-from .serializers import InvoiceAcceptSerializer, InvoiceCreateSerializer
+from catalog.api_errors import UNAUTHORIZED, drf_validation_error, error_body
+from sellers.auth import SellerJWTAuthentication
+
+from .invoice_create_service import CreateInvoiceError, create_invoice
+from .serializers import InvoiceCreateSerializer, InvoiceResponseSerializer
 
 
-class InvoiceCreateAPIView(generics.CreateAPIView):
-    """POST /api/v1/invoices — создать накладную (статус CREATED, склад ещё не принял)."""
+class InvoiceCreateAPIView(generics.GenericAPIView):
+    """POST /api/v1/invoices — OpenAPI createInvoice."""
 
-    queryset = Invoice.objects.all()
+    authentication_classes = [SellerJWTAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
     serializer_class = InvoiceCreateSerializer
 
-
-class InvoiceAcceptAPIView(APIView):
-    """POST /api/v1/invoices/accept — принять накладную на склад (остатки SKU + статус ACCEPTED)."""
-
     def post(self, request, *args, **kwargs):
-        serializer = InvoiceAcceptSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        serializer.save()
-        return Response(serializer.data, status=status.HTTP_200_OK)
+        if not request.user or not getattr(request.user, "is_authenticated", False):
+            return Response(
+                error_body(code=UNAUTHORIZED, message="Authentication required"),
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        serializer = self.get_serializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(
+                drf_validation_error(serializer.errors),
+                status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            )
+
+        items = serializer.validated_data["items"]
+        if not items:
+            return Response(
+                error_body(
+                    code="VALIDATION_ERROR",
+                    message="Invoice must contain at least one item",
+                ),
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        seller_id = getattr(request.user, "id", None)
+        try:
+            invoice = create_invoice(
+                seller_id=seller_id,
+                items=[
+                    {"sku_id": row["sku_id"], "quantity": row["quantity"]}
+                    for row in items
+                ],
+            )
+        except CreateInvoiceError as exc:
+            return Response(
+                error_body(code=exc.code, message=exc.message),
+                status=exc.status_code,
+            )
+
+        return Response(
+            InvoiceResponseSerializer(invoice).data,
+            status=status.HTTP_201_CREATED,
+        )
