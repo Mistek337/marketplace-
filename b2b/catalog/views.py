@@ -5,7 +5,6 @@ from rest_framework import generics, status
 from rest_framework import permissions
 from rest_framework.response import Response
 from django.conf import settings
-from django.db.models import Min
 
 from sellers.auth import SellerJWTAuthentication
 
@@ -22,6 +21,7 @@ from .api_errors import (
     error_body,
 )
 from .category_tree import build_categories_index
+from .seller_product_list import seller_product_list_queryset
 from .serializers import (
     CategoryCreateSerializer,
     CategoryResponseSerializer,
@@ -209,21 +209,23 @@ class ProductListCreateAPIView(generics.ListCreateAPIView):
         limit = max(1, min(limit, 100))
         offset = max(0, offset)
 
-        qs = (
-            Product.objects.filter(seller_id=request.user.id)
-            .prefetch_related("image_rows", "skus")
-            .annotate(min_price=Min("skus__price"))
-            .order_by("-created_at")
-        )
         include_deleted = str(
             request.query_params.get("include_deleted", "false")
         ).lower() in ("1", "true", "yes")
-        if not include_deleted:
-            qs = qs.filter(deleted=False)
-
         status_filter = request.query_params.get("status")
-        if status_filter:
-            qs = qs.filter(status=status_filter)
+        if status_filter and status_filter not in Product.Status.values:
+            return Response(
+                drf_validation_error(
+                    {"status": f"Must be one of: {', '.join(Product.Status.values)}"},
+                ),
+                status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            )
+
+        qs = seller_product_list_queryset(
+            seller_id=request.user.id,
+            include_deleted=include_deleted,
+            status=status_filter,
+        )
 
         total_count = qs.count()
         items = qs[offset : offset + limit]
