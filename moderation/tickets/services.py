@@ -61,11 +61,11 @@ def _emit_outbox_event(*, ticket: Ticket, event: str, payload: dict, idempotency
     return payload
 
 
-def emit_moderated_event(ticket: Ticket) -> dict:
+def emit_moderated_event(ticket: Ticket, *, comment: str = '') -> dict:
     payload = build_moderated_payload(
         ticket_id=ticket.id,
         product_id=ticket.product_id,
-        seller_id=ticket.seller_id,
+        moderator_comment=comment or (ticket.decision_comment or ''),
     )
     return _emit_outbox_event(
         ticket=ticket,
@@ -75,20 +75,29 @@ def emit_moderated_event(ticket: Ticket) -> dict:
     )
 
 
+def _primary_blocking_reason_id(reasons: list[BlockingReason], *, is_hard: bool) -> uuid.UUID:
+    if is_hard:
+        for reason in reasons:
+            if reason.hard_block:
+                return reason.id
+    return reasons[0].id
+
+
 def emit_blocked_event(
     ticket: Ticket,
     *,
     hard_block: bool,
-    blocking_reason_ids: list[uuid.UUID],
+    blocking_reason_id: uuid.UUID,
     comment: str = '',
+    field_reports: list[dict] | None = None,
 ) -> dict:
     payload = build_blocked_payload(
         ticket_id=ticket.id,
         product_id=ticket.product_id,
-        seller_id=ticket.seller_id,
         hard_block=hard_block,
-        blocking_reason_ids=blocking_reason_ids,
-        comment=comment,
+        blocking_reason_id=blocking_reason_id,
+        moderator_comment=comment,
+        field_reports=field_reports if field_reports is not None else ticket.field_reports,
     )
     return _emit_outbox_event(
         ticket=ticket,
@@ -141,7 +150,7 @@ def approve_ticket(*, ticket_id: uuid.UUID, moderator: Moderator, comment: str =
         ticket.decision_comment = comment
     ticket.save(update_fields=['status', 'decision_at', 'decision_comment', 'updated_at'])
 
-    emit_moderated_event(ticket)
+    emit_moderated_event(ticket, comment=comment)
     return ticket
 
 
@@ -184,8 +193,9 @@ def block_ticket(
     emit_blocked_event(
         ticket,
         hard_block=is_hard,
-        blocking_reason_ids=[reason.id for reason in reasons],
+        blocking_reason_id=_primary_blocking_reason_id(reasons, is_hard=is_hard),
         comment=comment,
+        field_reports=ticket.field_reports,
     )
     return ticket
 

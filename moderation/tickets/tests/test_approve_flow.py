@@ -53,14 +53,15 @@ def test_approve_transitions_to_moderated_and_emits_event(
 
     deliver_mock.assert_called_once()
     payload = deliver_mock.call_args.args[0]
-    assert payload['event'] == 'MODERATED'
+    assert payload['event_type'] == 'MODERATED'
     assert payload['product_id'] == str(ticket.product_id)
-    assert payload['seller_id'] == str(ticket.seller_id)
     assert payload['idempotency_key']
+    assert payload['occurred_at']
+    assert payload['moderator_comment'] == 'ok'
 
     outbox = B2BOutboxEvent.objects.get(ticket=ticket)
     assert outbox.sent_at is not None
-    assert outbox.payload['event'] == 'MODERATED'
+    assert outbox.payload['event_type'] == 'MODERATED'
 
 
 @pytest.mark.django_db

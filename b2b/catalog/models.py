@@ -33,6 +33,20 @@ class Category(models.Model):
             raise ValidationError({'parent': 'Категория не может быть родителем самой себя.'})
 
 
+class BlockingReason(models.Model):
+    """Причина блокировки (данные от Moderation → B2B)."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    title = models.CharField(max_length=200)
+    comment = models.TextField(blank=True, default='')
+
+    class Meta:
+        ordering = ['title']
+
+    def __str__(self) -> str:
+        return self.title
+
+
 class Product(models.Model):
     class Status(models.TextChoices):
         CREATED = 'CREATED', 'Created'
@@ -48,6 +62,7 @@ class Product(models.Model):
     description = models.TextField(blank=True)
     blocking_reason_id = models.UUIDField(null=True, blank=True)
     moderator_comment = models.TextField(blank=True, default="")
+    field_reports = models.JSONField(default=list, blank=True)
     status = models.CharField(
         max_length=32,
         choices=Status.choices,
@@ -195,8 +210,24 @@ class InventoryReservation(models.Model):
         ordering = ['created_at']
 
 
+class ProcessedModerationEvent(models.Model):
+    """Идемпотентность POST /api/v1/moderation/events: (sender_service, idempotency_key), TTL 24ч."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    sender_service = models.CharField(max_length=64, db_index=True)
+    idempotency_key = models.UUIDField(db_index=True)
+    event_type = models.CharField(max_length=16)
+    product_id = models.UUIDField(db_index=True)
+    occurred_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['created_at']
+        unique_together = [('sender_service', 'idempotency_key')]
+
+
 class B2COutboxEvent(models.Model):
-    """Outbox событий B2B → B2C (SKU_OUT_OF_STOCK и др.)."""
+    """Outbox событий B2B → B2C (SKU_OUT_OF_STOCK, PRODUCT_BLOCKED и др.)."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     idempotency_key = models.UUIDField(unique=True, db_index=True)

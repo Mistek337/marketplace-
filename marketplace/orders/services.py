@@ -1,7 +1,8 @@
-"""Checkout: idempotency → validate cart → B2B reserve → Order PAID с фиксацией цен."""
+"""Checkout и отмена заказов (OpenAPI Orders)."""
 
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import timedelta
 from uuid import UUID
@@ -14,10 +15,29 @@ from catalog.b2b_client import B2BClient, B2BClientError
 
 from .models import Address, Order, OrderItem, PaymentMethod, hash_checkout_request
 
+logger = logging.getLogger(__name__)
+
 IDEMPOTENCY_TTL = timedelta(hours=1)
+# OpenAPI POST /orders/{order_id}/cancel: CREATED, PAID, ASSEMBLING
+CANCELLABLE_STATUSES = frozenset(
+    {
+        Order.Status.CREATED,
+        Order.Status.PAID,
+        Order.Status.ASSEMBLING,
+    }
+)
 
 
 class CheckoutError(Exception):
+    def __init__(self, *, code: str, message: str, details=None, status_code: int = 400):
+        self.code = code
+        self.message = message
+        self.details = details
+        self.status_code = status_code
+        super().__init__(message)
+
+
+class CancelError(Exception):
     def __init__(self, *, code: str, message: str, details=None, status_code: int = 400):
         self.code = code
         self.message = message
@@ -30,6 +50,22 @@ def _order_number(order_id: UUID) -> str:
     year = timezone.now().year
     suffix = str(order_id).replace("-", "")[:6].upper()
     return f"NM-{year}-{suffix}"
+
+
+def _iso_z(dt) -> str:
+    return dt.isoformat().replace("+00:00", "Z")
+
+
+def _append_status_history(order: Order, *, status: str, reason: str | None = None) -> None:
+    history = list(order.status_history or [])
+    history.append(
+        {
+            "status": status,
+            "changed_at": _iso_z(timezone.now()),
+            "reason": reason,
+        }
+    )
+    order.status_history = history
 
 
 def _address_snapshot(address: Address) -> dict:
@@ -216,11 +252,19 @@ def checkout_order(
                 )
             return duplicate, False
 
+        paid_history = [
+            {
+                "status": Order.Status.PAID,
+                "changed_at": _iso_z(now),
+                "reason": None,
+            }
+        ]
         order = Order.objects.create(
             id=order_id,
             buyer=buyer,
             number=_order_number(order_id),
             status=Order.Status.PAID,
+            status_history=paid_history,
             idempotency_key=idempotency_key,
             request_hash=request_hash,
             address_snapshot=_address_snapshot(address),
@@ -286,3 +330,101 @@ def _assert_items_snapshot_matches(cart_lines: list[dict], snapshot: list) -> No
                 message="items_snapshot price mismatch",
                 status_code=422,
             )
+
+
+def _build_unreserve_items(order: Order) -> list[dict]:
+    return [
+        {"sku_id": row.sku_id, "quantity": row.quantity}
+        for row in order.items.all()
+    ]
+
+
+def _call_b2b_unreserve(order: Order) -> bool:
+    """Возвращает True, если unreserve успешен (или резерва уже не было)."""
+    client = B2BClient()
+    items = _build_unreserve_items(order)
+    try:
+        client.unreserve_inventory(order_id=order.id, items=items)
+        return True
+    except B2BClientError as exc:
+        if exc.status_code == 404:
+            return True
+        logger.error(
+            "B2B unreserve failed for order %s: %s (status=%s)",
+            order.id,
+            exc.message,
+            exc.status_code,
+            exc_info=True,
+        )
+        return False
+
+
+def _finalize_cancelled(order_id: UUID, *, cancel_reason: str) -> Order:
+    with transaction.atomic():
+        order = Order.objects.select_for_update().prefetch_related("items").get(pk=order_id)
+        order.status = Order.Status.CANCELLED
+        order.cancel_reason = cancel_reason
+        _append_status_history(order, status=Order.Status.CANCELLED, reason=cancel_reason or None)
+        order.save(update_fields=["status", "cancel_reason", "status_history"])
+    return order
+
+
+def cancel_order(*, buyer, order_id: UUID, reason: str = "") -> Order:
+    """
+    OpenAPI POST /orders/{order_id}/cancel:
+    CANCEL_PENDING → unreserve B2B → CANCELLED или остаётся CANCEL_PENDING.
+    """
+    cancel_reason = (reason or "").strip()[:500]
+
+    try:
+        order = Order.objects.prefetch_related("items").get(id=order_id, buyer=buyer)
+    except Order.DoesNotExist as exc:
+        raise CancelError(
+            code="NOT_FOUND",
+            message="Order not found",
+            status_code=404,
+        ) from exc
+
+    if order.status == Order.Status.CANCELLED:
+        return order
+
+    if order.status == Order.Status.CANCEL_PENDING:
+        if _call_b2b_unreserve(order):
+            return _finalize_cancelled(order.id, cancel_reason=order.cancel_reason or cancel_reason)
+        return Order.objects.prefetch_related("items").get(pk=order.pk)
+
+    if order.status not in CANCELLABLE_STATUSES:
+        raise CancelError(
+            code="CANCEL_NOT_ALLOWED",
+            message="Order cannot be cancelled in the current status",
+            details={"status": order.status},
+            status_code=409,
+        )
+
+    with transaction.atomic():
+        order = Order.objects.select_for_update().prefetch_related("items").get(pk=order.pk)
+        order.status = Order.Status.CANCEL_PENDING
+        order.cancel_reason = cancel_reason
+        _append_status_history(
+            order,
+            status=Order.Status.CANCEL_PENDING,
+            reason=cancel_reason or None,
+        )
+        order.save(update_fields=["status", "cancel_reason", "status_history"])
+
+    if _call_b2b_unreserve(order):
+        return _finalize_cancelled(order.id, cancel_reason=cancel_reason)
+
+    return Order.objects.prefetch_related("items").get(pk=order.pk)
+
+
+def retry_cancel_unreserve_for_pending_orders() -> int:
+    """Management command / cron: повтор unreserve для CANCEL_PENDING."""
+    processed = 0
+    pending_ids = Order.objects.filter(status=Order.Status.CANCEL_PENDING).values_list("id", flat=True)
+    for order_id in pending_ids:
+        order = Order.objects.prefetch_related("items").get(pk=order_id)
+        if _call_b2b_unreserve(order):
+            _finalize_cancelled(order.id, cancel_reason=order.cancel_reason)
+            processed += 1
+    return processed

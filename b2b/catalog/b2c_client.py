@@ -75,7 +75,7 @@ def _build_product_blocked_payload(
     }
 
 
-def _deliver_b2c_product_legacy_payload(payload: dict) -> bool:
+def _deliver_b2c_product_payload(payload: dict) -> bool:
     base_url = (getattr(settings, "B2C_EVENTS_BASE_URL", "") or "").rstrip("/")
     if not base_url:
         return False
@@ -165,7 +165,7 @@ def emit_product_blocked_event(*, product_id, hard_block: bool, idempotency_key:
         product_id=product_id,
         payload=payload,
     )
-    if _deliver_b2c_product_legacy_payload(payload):
+    if _deliver_b2c_product_payload(payload):
         B2COutboxEvent.objects.filter(pk=outbox.pk).update(sent_at=django_tz.now())
 
 

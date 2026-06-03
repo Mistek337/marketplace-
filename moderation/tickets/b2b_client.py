@@ -23,43 +23,68 @@ def blocked_idempotency_key(ticket_id: uuid.UUID) -> uuid.UUID:
     return uuid.uuid5(EVENT_NAMESPACE, f'ticket-block:{ticket_id}')
 
 
-def build_moderated_payload(*, ticket_id: uuid.UUID, product_id: uuid.UUID, seller_id: uuid.UUID) -> dict:
-    idempotency_key = moderated_idempotency_key(ticket_id)
-    return {
-        'idempotency_key': str(idempotency_key),
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec='milliseconds').replace('+00:00', 'Z')
+
+
+def field_reports_for_b2b(reports: list[dict] | None) -> list[dict]:
+    """ModerationEventRequest.field_reports: {field_name, comment, sku_id?}."""
+    if not reports:
+        return []
+    normalized = []
+    for item in reports:
+        field_name = item.get('field_name') or item.get('field_path') or ''
+        comment = item.get('comment') or item.get('message') or ''
+        row = {'field_name': field_name, 'comment': comment}
+        sku_id = item.get('sku_id')
+        if sku_id:
+            row['sku_id'] = str(sku_id)
+        normalized.append(row)
+    return normalized
+
+
+def build_moderated_payload(
+    *,
+    ticket_id: uuid.UUID,
+    product_id: uuid.UUID,
+    moderator_comment: str = '',
+) -> dict:
+    """OpenAPI ModerationEventRequest для event_type=MODERATED."""
+    payload = {
+        'idempotency_key': str(moderated_idempotency_key(ticket_id)),
         'product_id': str(product_id),
-        'seller_id': str(seller_id),
-        'event': 'MODERATED',
-        'date': _now_iso(),
+        'event_type': 'MODERATED',
+        'occurred_at': _now_iso(),
     }
+    if moderator_comment:
+        payload['moderator_comment'] = moderator_comment
+    return payload
 
 
 def build_blocked_payload(
     *,
     ticket_id: uuid.UUID,
     product_id: uuid.UUID,
-    seller_id: uuid.UUID,
     hard_block: bool,
-    blocking_reason_ids: list[uuid.UUID],
-    comment: str = '',
+    blocking_reason_id: uuid.UUID,
+    moderator_comment: str = '',
+    field_reports: list[dict] | None = None,
 ) -> dict:
-    idempotency_key = blocked_idempotency_key(ticket_id)
+    """OpenAPI ModerationEventRequest для event_type=BLOCKED."""
     payload = {
-        'idempotency_key': str(idempotency_key),
+        'idempotency_key': str(blocked_idempotency_key(ticket_id)),
         'product_id': str(product_id),
-        'seller_id': str(seller_id),
-        'event': 'BLOCKED',
+        'event_type': 'BLOCKED',
+        'occurred_at': _now_iso(),
         'hard_block': hard_block,
-        'blocking_reason_ids': [str(rid) for rid in blocking_reason_ids],
-        'date': _now_iso(),
+        'blocking_reason_id': str(blocking_reason_id),
     }
-    if comment:
-        payload['comment'] = comment
+    if moderator_comment:
+        payload['moderator_comment'] = moderator_comment
+    b2b_reports = field_reports_for_b2b(field_reports)
+    if b2b_reports:
+        payload['field_reports'] = b2b_reports
     return payload
-
-
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec='milliseconds').replace('+00:00', 'Z')
 
 
 def deliver_b2b_payload(payload: dict) -> bool:
@@ -78,7 +103,7 @@ def deliver_b2b_payload(payload: dict) -> bool:
         req.add_header('X-Service-Key', service_key)
 
     timeout = float(getattr(settings, 'B2B_TIMEOUT', 5))
-    event = payload.get('event', '?')
+    event = payload.get('event_type', payload.get('event', '?'))
     try:
         with request.urlopen(req, timeout=timeout):
             return True

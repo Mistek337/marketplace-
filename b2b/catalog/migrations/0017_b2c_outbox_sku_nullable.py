@@ -4,7 +4,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("catalog", "0013_inventory_reservation_outbox"),
+        ("catalog", "0016_processed_moderation_openapi"),
     ]
 
     operations = [

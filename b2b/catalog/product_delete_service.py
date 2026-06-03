@@ -7,6 +7,7 @@ from uuid import UUID
 
 from django.db import transaction
 
+from .api_errors import FORBIDDEN
 from .models import Product
 
 
@@ -35,6 +36,13 @@ def delete_product(*, seller_id: UUID, product_id: UUID) -> None:
         raise DeleteProductError(
             code="NOT_OWNER",
             message="Product does not belong to the authenticated seller",
+            status_code=403,
+        )
+
+    if product.status == Product.Status.HARD_BLOCKED:
+        raise DeleteProductError(
+            code=FORBIDDEN,
+            message="Product is hard-blocked",
             status_code=403,
         )
 
