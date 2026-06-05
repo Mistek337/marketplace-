@@ -7,7 +7,7 @@ from unittest.mock import patch
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
-from catalog.api_errors import CONFLICT
+from catalog.api_errors import CONFLICT, FORBIDDEN
 from catalog.models import B2COutboxEvent, Category, ModerationOutboxEvent, Product, SKU
 from sellers.models import Seller
 
@@ -57,6 +57,19 @@ class DeleteSKUFlowTests(TestCase):
 
         product.refresh_from_db()
         self.assertEqual(product.status, Product.Status.MODERATED)
+
+    def test_delete_sku_hard_blocked_product_returns_403(self):
+        product = self._product(status=Product.Status.HARD_BLOCKED)
+        sku = self._sku(product, active=1)
+
+        resp = self.client.delete(f"/api/v1/skus/{sku.id}")
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.json()["code"], FORBIDDEN)
+        self.assertEqual(
+            resp.json()["message"],
+            "Cannot delete SKU of hard-blocked product",
+        )
+        self.assertTrue(SKU.objects.filter(pk=sku.id).exists())
 
     def test_delete_sku_with_active_reserves_returns_409(self):
         product = self._product()
