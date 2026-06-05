@@ -58,10 +58,15 @@ def test_approve_transitions_to_moderated_and_emits_event(
     assert payload['idempotency_key']
     assert payload['occurred_at']
     assert payload['moderator_comment'] == 'ok'
+    assert 'event' not in payload
+    assert 'date' not in payload
+    assert 'seller_id' not in payload
 
     outbox = B2BOutboxEvent.objects.get(ticket=ticket)
     assert outbox.sent_at is not None
     assert outbox.payload['event_type'] == 'MODERATED'
+    assert 'event' not in outbox.payload
+    assert 'date' not in outbox.payload
 
 
 @pytest.mark.django_db
