@@ -544,11 +544,20 @@ class SKURetrieveUpdateAPIView(generics.RetrieveUpdateAPIView):
         )
 
     def delete(self, request, *args, **kwargs):
-        """OpenAPI deleteSku — 204 / 409."""
+        """OpenAPI deleteSku — 204 / 403 / 409."""
         try:
             sku = self.get_object()
         except Http404:
             return Response(status=status.HTTP_204_NO_CONTENT)
+
+        if sku.product.status == Product.Status.HARD_BLOCKED:
+            return Response(
+                error_body(
+                    code=FORBIDDEN,
+                    message="Cannot delete SKU of hard-blocked product",
+                ),
+                status=status.HTTP_403_FORBIDDEN,
+            )
 
         try:
             delete_sku(sku_id=sku.id)
